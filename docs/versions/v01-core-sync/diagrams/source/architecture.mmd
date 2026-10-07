@@ -1,0 +1,12 @@
+flowchart LR
+  U[Cliente] --> CF[Cloudflare / Web]
+  O[Tenant Owner] --> CF
+  D[Driver] --> CF
+  P[Platform Owner] --> CF
+  CF --> TR[Tenant Resolver]
+  TR --> FB[Firebase]
+  FB --> A[Auth]
+  FB --> FS[Firestore]
+  FB --> ST[Storage]
+  TR --> T1[Tenant Alpha]
+  TR --> T2[Tenant Beta]

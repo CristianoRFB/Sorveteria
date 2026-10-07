@@ -1,0 +1,1765 @@
+CODEX GOAL — IMPLEMENTAÇÃO SAAS SORVETERIA
+ETAPA: CORE MULTI-TENANT FIRST
+FONTE DE VERDADE: SAAS_SORVETERIA_GLOBAL_CONSOLIDATION_READY_v05.zip
+GLOBAL STANDARD v01: APROVADO NO ECOSSISTEMA, MAS NÃO IMPLEMENTAR NESTE GOAL
+
+======================================================================
+1. CONTEXTO OPERACIONAL
+======================================================================
+
+Produto:
+SaaS Sorveteria — Multi-Tenant White-Label.
+
+Fonte técnica atual:
+SAAS_SORVETERIA_GLOBAL_CONSOLIDATION_READY_v05.zip
+
+Documentação canônica dentro da base:
+docs/versions/v05-global-consolidation-ready/
+
+Arquivos comerciais canônicos:
+- DECISIONS_APPROVED.md
+- PRICING_AND_PLANS_APPROVED.md
+- FEATURE_MATRIX_APPROVED.md
+- DELTA_TECNICO.md
+- PRIORIZACAO.md
+- GLOBAL_CONSOLIDATION_HANDOFF.md
+
+Repositório associado:
+CristianoRFB/Sorveteria
+
+Estado conhecido do GitHub no momento em que este GOAL foi gerado:
+- repositório existente;
+- branch principal `main`;
+- repositório remoto vazio;
+- a codebase real reaproveitável está no ZIP canônico v05.
+
+REGRA:
+não reconstruir outro produto e não gerar outro ZIP paralelo.
+Trabalhar sobre a codebase v05 já existente/extrair essa base no workspace de execução.
+
+Se o workspace já possuir uma versão mais nova desta mesma codebase:
+- preserve mudanças saudáveis;
+- não force downgrade para v05;
+- use v05 como baseline documental mínimo;
+- não substitua código mais novo por código antigo sem conflito técnico concreto.
+
+Se houver um repo local ligado ao remoto vazio:
+- não apagar arquivos da base;
+- não usar reset destrutivo;
+- não criar outro repositório paralelo;
+- somente preparar commits/push se o usuário explicitamente pedir durante a execução.
+
+======================================================================
+2. OBJETIVO DESTE GOAL
+======================================================================
+
+Concluir o CORE MULTI-TENANT seguro e o fluxo ESSENCIAL ponta a ponta da vertical Sorveteria.
+
+O estado final desejado é:
+
+CORE_READINESS=READY_FOR_GLOBAL_STANDARD_IMPLEMENTATION
+
+Isso significa que, ao final desta rodada, a vertical deve estar tecnicamente pronta para receber em um GOAL posterior o GLOBAL STANDARD v01:
+
+- PlanCatalog
+- EntitlementService
+- FeatureGating
+- Limits
+- DemoMode
+- SubscriptionStatus
+- TenantOverrides
+- ManualPlanAssignment
+- downgrade preservando dados
+
+NÃO implementar esses itens agora.
+
+Este GOAL é somente:
+
+CORE MULTI-TENANT
++
+ESSENCIAL END-TO-END
++
+SEGURANÇA
++
+TESTES
++
+DOCUMENTAÇÃO
+
+======================================================================
+3. DECISÕES COMERCIAIS APROVADAS — PRESERVAR
+======================================================================
+
+Não reavaliar preços.
+
+Planos aprovados:
+
+ESSENCIAL
+- R$ 69,90/mês
+- R$ 699/ano
+
+PRO
+- R$ 129,90/mês
+- R$ 1.299/ano
+- plano recomendado
+
+PREMIUM
+- R$ 229,90/mês
+- R$ 2.299/ano
+
+Limites aprovados:
+
+internal_users:
+- Essencial: 2
+- Pro: 5
+- Premium: 15
+
+drivers_active:
+- Essencial: 1
+- Pro: 5
+- Premium: 15
+
+units:
+- Essencial: 1
+- Pro: 1
+- Premium: 1
+
+Pedidos:
+- sem limite comercial artificial.
+
+Produtos:
+- sem limite comercial artificial.
+
+IMPORTANTE:
+essas decisões permanecem documentais nesta rodada.
+NÃO criar enforcement de plano neste GOAL.
+
+======================================================================
+4. BASE EXISTENTE QUE DEVE SER PRESERVADA
+======================================================================
+
+A base v05 já contém código real e estrutura aproveitável, incluindo:
+
+- React;
+- TypeScript;
+- Vite;
+- Firebase;
+- Firestore;
+- Storage;
+- React Router;
+- Zod;
+- QR Code;
+- TenantContext;
+- tenant resolver por slug;
+- domínio de roles;
+- domínio de tenant;
+- domínio de orders;
+- domínio de delivery;
+- domínio de audit;
+- TenantFeatureFlags;
+- Firestore Rules;
+- Storage Rules;
+- PlatformAdminPage;
+- TenantAdminPage;
+- TenantStorefrontPage;
+- TenantMenuPage;
+- TenantTrackingPage;
+- TenantQrAdminPage;
+- landing SaaS;
+- testes unitários iniciais;
+- scripts de Rules tests;
+- documentação versionada.
+
+Preserve código saudável.
+Não refatore por estética.
+Mude estrutura apenas quando necessário para segurança, isolamento, clareza de domínio ou testabilidade.
+
+======================================================================
+5. AUTENTICAÇÃO REAL
+======================================================================
+
+Implementar autenticação real baseada em Firebase Auth.
+
+Criar/terminar a camada necessária para:
+
+- observar sessão;
+- auth loading;
+- login;
+- logout;
+- current user;
+- erro de autenticação;
+- recuperação de estado após refresh;
+- resolução de claims quando aplicável;
+- resolução de membership;
+- contexto autenticado reutilizável.
+
+Não confiar em role enviada arbitrariamente pelo frontend.
+
+O fluxo de auth deve funcionar sem hardcode de usuário.
+
+======================================================================
+6. MEMBERSHIPS E RBAC
+======================================================================
+
+A base atual usa o conceito:
+
+memberships/{tenantId}_{uid}
+
+Preserve esse formato se continuar compatível com consultas e Rules.
+
+Implementar resolução real:
+
+authenticated user
+→ tenant atual
+→ membership
+→ role
+→ status
+→ autorização efetiva
+
+Papéis existentes que podem ser usados quando aplicáveis:
+
+- platform_owner
+- tenant_owner
+- tenant_admin
+- staff
+- cashier
+- customer
+- driver
+
+Não criar papéis extras sem necessidade real.
+
+Aplicar RBAC de verdade às rotas e ações.
+
+======================================================================
+7. ROUTE GUARDS
+======================================================================
+
+A base atual possui rotas como:
+
+/
+ /admin
+ /:tenantSlug/*
+ /:tenantSlug/cardapio
+ /:tenantSlug/acompanhar
+ /:tenantSlug/painel
+ /:tenantSlug/painel/qr-codes
+
+Proteger:
+
+/admin
+→ somente platform_owner.
+
+/:tenantSlug/painel
+/:tenantSlug/painel/*
+→ somente membros autorizados daquele tenant.
+
+Não deixar páginas administrativas acessíveis apenas porque a UI não mostra o link.
+
+Criar estados claros:
+
+- loading;
+- unauthenticated;
+- unauthorized;
+- tenant missing;
+- tenant suspended;
+- membership missing/inactive.
+
+======================================================================
+8. PLATFORM OWNER
+======================================================================
+
+Transformar a área Platform Admin existente em capacidade mínima real.
+
+O platform_owner deve conseguir:
+
+- listar tenants;
+- ver slug;
+- ver status;
+- criar tenant de desenvolvimento/onboarding quando necessário;
+- suspender tenant;
+- reativar tenant;
+- entrar explicitamente no contexto de um tenant;
+- sair/trocar de contexto;
+- visualizar informação operacional mínima necessária ao suporte.
+
+Ações críticas devem estar preparadas para AuditLog.
+
+Nunca permitir exclusão destrutiva automática do tenant.
+
+Suspensão:
+- preserva dados;
+- impede operação conforme Rules/política;
+- pode ser revertida pelo platform_owner.
+
+NÃO implementar gestão de planos nesta rodada.
+
+======================================================================
+9. TENANT RESOLVER
+======================================================================
+
+Preservar o serviço já existente em:
+
+src/services/tenantResolver.ts
+
+A resolução atual usa:
+
+slug
++
+status = active
+→ Tenant
+
+Endurecer o comportamento sem criar fallback silencioso para outro tenant.
+
+Cobrir:
+
+- slug válido;
+- slug inválido;
+- tenant inexistente;
+- tenant suspenso;
+- erros de Firestore;
+- loading;
+- ausência de configuração;
+- nenhuma dependência de tenant hardcoded.
+
+Garantir que o TenantContext seja a fonte de contexto para páginas tenant-scoped.
+
+======================================================================
+10. TENANT A × TENANT B
+======================================================================
+
+Materializar fixtures/seeds de desenvolvimento/emulator para pelo menos:
+
+tenant-alpha
+tenant-beta
+
+Nunca popular produção automaticamente.
+
+Criar usuários/fixtures suficientes para validar:
+
+- platform_owner;
+- owner-alpha;
+- owner-beta;
+- staff-alpha;
+- staff-beta quando útil;
+- driver-alpha;
+- driver-beta;
+- customer-alpha;
+- customer-beta.
+
+Objetivo:
+provar isolamento real, não apenas declarar intenção.
+
+======================================================================
+11. FIRESTORE RULES
+======================================================================
+
+Preservar o deny-by-default já existente.
+
+Revisar e fortalecer:
+
+firestore.rules
+
+Sem introduzir:
+
+allow read, write: if true;
+
+Validar:
+
+PLATFORM OWNER
+- acesso autorizado a alpha;
+- acesso autorizado a beta.
+
+OWNER ALPHA
+- acessa tenant-alpha;
+- não acessa tenant-beta.
+
+OWNER BETA
+- acessa tenant-beta;
+- não acessa tenant-alpha.
+
+STAFF
+- somente tenant e áreas autorizadas.
+
+CUSTOMER
+- nunca consegue ler/escrever dados administrativos de outro tenant;
+- não altera role;
+- não cria platform_owner;
+- não altera dados financeiros/privilegiados.
+
+DRIVER
+- somente tenant próprio;
+- somente entregas permitidas;
+- não altera driverId/tenantId para escapar de escopo.
+
+TENANT SUSPENSO
+- comportamento público e administrativo coerente com a política documentada.
+
+ORDERS
+- criação pública/autenticada não aceita campos privilegiados arbitrários;
+- updates operacionais exigem role apropriada.
+
+AUDIT LOGS
+- frontend comum não grava diretamente logs privilegiados se isso comprometer integridade.
+
+======================================================================
+12. STORAGE RULES
+======================================================================
+
+Revisar:
+
+storage.rules
+
+Garantir path tenant-aware.
+
+Separar conceitualmente quando necessário:
+
+- assets públicos de branding/catalog;
+- arquivos internos/privados.
+
+Writes:
+- somente usuário/membro/role autorizado;
+- sempre tenant-scoped;
+- sem possibilidade de gravar no tenant de terceiros.
+
+Não manter leitura pública ampla para qualquer arquivo futuro se o path também puder receber conteúdo privado.
+
+======================================================================
+13. OPERAÇÕES CONFIÁVEIS
+======================================================================
+
+A base atual não possui backend confiável completo.
+
+Para operações em que o browser não pode ser autoridade, definir e implementar a solução mínima segura compatível com a stack existente e o baixo custo.
+
+Não ativar serviço pago automaticamente.
+
+Campos que NÃO devem ser aceitos como verdade apenas porque vieram do browser:
+
+- preço unitário autoritativo;
+- subtotal final;
+- desconto;
+- taxa de entrega;
+- total;
+- status privilegiado;
+- confirmação de entrega;
+- delivery confirmation code;
+- campos administrativos;
+- roles.
+
+A solução pode usar Rules, transações, serviços confiáveis ou backend quando necessário.
+
+Se uma garantia exigir billing/serviço externo:
+- não ativar automaticamente;
+- registrar NEEDS_USER_ACTION;
+- continuar tarefas independentes;
+- não marcar a garantia como concluída sem evidência.
+
+======================================================================
+14. CATÁLOGO ESSENCIAL DE SORVETERIA
+======================================================================
+
+Completar o catálogo tenant-scoped necessário para um fluxo real.
+
+Implementar:
+
+- categorias;
+- produtos;
+- disponibilidade;
+- preço;
+- tamanhos;
+- recipientes;
+- sabores;
+- grupos de opções;
+- adicionais;
+- coberturas quando aplicável;
+- validação mínima e máxima de escolhas.
+
+O modelo deve suportar por configuração, sem hardcode de um único produto:
+
+POTE
+- tamanho;
+- múltiplos sabores;
+- adicionais.
+
+CASQUINHA
+- quantidade de bolas;
+- sabores;
+- adicionais opcionais.
+
+MILKSHAKE
+- tamanho;
+- sabor;
+- adicionais.
+
+Não transformar o sistema em clone de açaiteria.
+Não hardcodar “Sol de Verão” no motor.
+
+======================================================================
+15. ÁREA ADMINISTRATIVA DO CATÁLOGO
+======================================================================
+
+O Tenant Owner/Admin autorizado deve conseguir:
+
+- listar categorias;
+- criar/editar categoria;
+- listar produtos;
+- criar/editar produto;
+- ativar/desativar;
+- configurar preços;
+- configurar opções;
+- configurar sabores/tamanhos/recipientes;
+- validar regras de seleção.
+
+Tudo tenant-scoped.
+
+Mudança no tenant alpha não pode afetar tenant beta.
+
+======================================================================
+16. STOREFRONT / CARDÁPIO
+======================================================================
+
+Completar o storefront existente para consumir dados reais do tenant.
+
+Fluxo:
+
+tenantSlug
+→ tenant
+→ branding
+→ categorias
+→ produtos
+→ personalização
+→ adicionar ao carrinho.
+
+Estados obrigatórios:
+
+- loading;
+- loja inexistente;
+- loja suspensa;
+- cardápio vazio;
+- produto indisponível;
+- erro de Firestore;
+- sucesso.
+
+Não usar dados fake em produção para mascarar Firestore vazio.
+
+======================================================================
+17. CARRINHO
+======================================================================
+
+Implementar carrinho funcional:
+
+- adicionar item;
+- remover item;
+- alterar quantidade;
+- editar personalização;
+- subtotal de apresentação;
+- restaurar após refresh quando apropriado;
+- limpar após pedido confirmado.
+
+O carrinho deve ser tenant-aware.
+
+Trocar de tenant:
+- nunca reutilizar o carrinho de outro tenant.
+
+Evitar flash incorreto de carrinho vazio durante hidratação.
+
+======================================================================
+18. CHECKOUT ESSENCIAL
+======================================================================
+
+Implementar:
+
+1. entrega ou retirada;
+2. dados do cliente;
+3. endereço quando delivery;
+4. pagamento;
+5. revisão;
+6. confirmar pedido.
+
+Proteger contra double-submit.
+
+O carrinho só é limpo depois de criação de pedido confirmada.
+
+Não implementar checkout de assinatura SaaS.
+
+Formas de pagamento devem ser configuráveis por tenant quando a base permitir.
+
+Não criar integração paga sem aprovação.
+
+======================================================================
+19. PEDIDOS
+======================================================================
+
+Implementar criação e gestão real de pedido.
+
+State machine mínima coerente:
+
+received
+→ confirmed
+→ preparing
+→ ready
+
+Retirada:
+ready
+→ ready_for_pickup
+→ picked_up
+
+Delivery:
+ready
+→ awaiting_driver
+→ out_for_delivery
+→ delivered
+
+Cancelamento:
+somente em estados permitidos.
+
+Cada pedido deve manter:
+
+- tenantId;
+- publicCode;
+- origem;
+- itens;
+- customizações;
+- snapshot seguro dos valores utilizados;
+- fulfillment;
+- status;
+- timestamps;
+- cliente mínimo necessário;
+- endereço quando delivery;
+- forma de pagamento;
+- total autoritativo;
+- dados de entrega quando aplicável.
+
+Não permitir transição inválida.
+
+======================================================================
+20. PUBLIC ORDER CODE
+======================================================================
+
+Gerar publicCode humano e não trivial.
+
+Objetivo:
+cliente conseguir acompanhar o pedido.
+
+Não usar publicCode como credencial administrativa.
+
+Tracking público deve exigir contexto do tenant e código correto.
+
+Evitar enumeração trivial/sequencial.
+
+======================================================================
+21. TRACKING REAL
+======================================================================
+
+A página atual de tracking deve deixar de ser apenas apresentação/formulário.
+
+Implementar consulta real:
+
+tenant
++
+publicCode
+→ projeção pública do pedido.
+
+Expor somente:
+
+- código;
+- status;
+- timeline;
+- estimativa quando configurada;
+- fulfillment;
+- informação pública necessária.
+
+Não expor:
+
+- dados internos;
+- audit logs;
+- notas privadas;
+- outros pedidos;
+- informações financeiras internas;
+- dados de outro tenant.
+
+Atualização realtime pode ser usada quando fizer sentido, sem listener descontrolado.
+
+======================================================================
+22. DELIVERY ESSENCIAL
+======================================================================
+
+Delivery simples é parte aprovada do Essencial.
+
+Implementar fluxo mínimo:
+
+pedido pronto
+→ delivery criada/atribuída
+→ driver autorizado
+→ saiu para entrega
+→ chegou
+→ confirmação
+→ entregue.
+
+Driver deve ter interface mobile-first suficiente para:
+
+- visualizar entrega atribuída;
+- ver endereço;
+- abrir rota externa quando aplicável;
+- marcar saída;
+- marcar chegada;
+- informar delivery confirmation code;
+- registrar falha/tentativa;
+- concluir.
+
+Não implementar serviço transversal de delivery entre SaaS.
+
+======================================================================
+23. DELIVERY CONFIRMATION CODE
+======================================================================
+
+Separar completamente:
+
+PUBLIC ORDER CODE
+de
+DELIVERY CONFIRMATION CODE.
+
+Delivery code:
+
+- tenant-scoped;
+- order-scoped;
+- não sequencial trivial;
+- short/human-friendly quando possível;
+- single-use;
+- inválido após entrega;
+- inválido após cancelamento;
+- não serve como auth;
+- não pode ser reaproveitado para outro pedido;
+- deve possuir proteção contra tentativas excessivas quando tecnicamente viável.
+
+Override por owner/platform_owner:
+- somente quando necessário;
+- motivo obrigatório quando aplicável;
+- auditável.
+
+======================================================================
+24. WHITE-LABEL
+======================================================================
+
+Preservar o white-label já existente.
+
+Garantir:
+
+- displayName;
+- logo quando configurado;
+- cores;
+- identidade visual básica;
+- contatos;
+- branding tenant-scoped.
+
+Não implementar custom domain automático agora.
+
+======================================================================
+25. QR
+======================================================================
+
+Preservar o QR de cardápio já implementado.
+
+Não expandir QR por mesa como requisito deste GOAL.
+
+QR por mesa/local continua associado ao Pro na decisão comercial.
+
+Não remover código saudável existente.
+
+======================================================================
+26. TENANT FEATURE FLAGS
+======================================================================
+
+Preservar TenantFeatureFlags como configuração operacional.
+
+NÃO transformar feature flag em entitlement.
+
+Neste GOAL, não criar:
+
+- PlanCatalog;
+- EntitlementService;
+- canUse();
+- getLimit();
+- SubscriptionStatus;
+- TenantOverrides;
+- Limits por plano.
+
+Essa camada pertence ao GOAL futuro do GLOBAL STANDARD v01.
+
+======================================================================
+27. LANDING SaaS
+======================================================================
+
+Manter a landing atual honesta.
+
+Não criar contratação real.
+
+Não criar CTA de assinatura falsa.
+
+Não alegar que plano/gating está implementado.
+
+Features PLANEJADAS não podem aparecer como IMPLEMENTADAS.
+
+Os preços aprovados podem continuar documentados, mas o runtime ainda não possui enforcement comercial.
+
+======================================================================
+28. AUDIT LOG
+======================================================================
+
+Consolidar mecanismo real para ações críticas que já fazem parte do core, especialmente:
+
+- suspensão/reativação de tenant;
+- mudança administrativa relevante;
+- override operacional de delivery;
+- ações globais do platform_owner.
+
+Audit record deve, quando aplicável, conter:
+
+- tenantId;
+- actorId;
+- action;
+- target;
+- timestamp;
+- metadata mínima;
+- motivo em ações que exigem justificativa.
+
+Não permitir adulteração comum pelo cliente.
+
+======================================================================
+29. TESTES UNITÁRIOS
+======================================================================
+
+Manter testes existentes e adicionar testes reais para:
+
+- tenant resolver;
+- tenant access;
+- RBAC;
+- catálogo/composição;
+- carrinho;
+- order state machine;
+- publicCode;
+- delivery code;
+- delivery state transitions.
+
+Testes devem validar comportamento, não apenas snapshots superficiais.
+
+======================================================================
+30. FIRESTORE RULES TESTS
+======================================================================
+
+O diretório `tests/rules/` não pode permanecer somente como README.
+
+Criar suíte executável usando:
+
+@firebase/rules-unit-testing
+
+Cobrir:
+
+- platform_owner;
+- owner-alpha;
+- owner-beta;
+- staff-alpha;
+- customer-alpha;
+- driver-alpha;
+- driver-beta;
+- tenant suspenso;
+- membership inativa;
+- cross-tenant reads;
+- cross-tenant writes;
+- privileged fields;
+- orders;
+- deliveries;
+- tracking projection;
+- audit log restrictions.
+
+Executar via:
+
+npm run test:rules
+
+======================================================================
+31. INTEGRAÇÃO
+======================================================================
+
+Criar testes de integração para fluxos essenciais:
+
+AUTH
+→ membership
+→ tenant context.
+
+CATÁLOGO
+→ personalização
+→ carrinho.
+
+CARRINHO
+→ checkout
+→ order.
+
+ORDER
+→ tracking.
+
+ORDER DELIVERY
+→ driver
+→ out_for_delivery
+→ arrived
+→ code
+→ delivered.
+
+======================================================================
+32. QA MANUAL
+======================================================================
+
+Validar no mínimo:
+
+CUSTOMER
+tenant-alpha
+→ storefront
+→ cardápio
+→ produto
+→ personalização
+→ carrinho
+→ checkout
+→ pedido
+→ tracking.
+
+OWNER ALPHA
+login
+→ painel
+→ catálogo
+→ pedido
+→ mudança de status.
+
+OWNER BETA
+login
+→ beta
+→ sem acesso a alpha.
+
+DRIVER ALPHA
+login
+→ entrega atribuída alpha
+→ saída
+→ chegada
+→ confirmação
+→ entregue
+→ sem acesso a beta.
+
+PLATFORM OWNER
+login
+→ listar tenants
+→ alpha
+→ sair
+→ beta
+→ suspender/reactivar em ambiente de teste.
+
+======================================================================
+33. QUALIDADE / TOOLCHAIN
+======================================================================
+
+Instalar dependências corretamente.
+
+Executar:
+
+npm run test
+npm run lint
+npm run build
+npm run test:rules
+
+Se existir typecheck separado, executar também.
+
+Não mascarar warnings relevantes ou erros.
+
+Corrigir regressões criadas nesta implementação.
+
+Se um comando falhar por bloqueio externo real:
+- registrar comando;
+- erro;
+- causa;
+- impacto;
+- ação necessária.
+
+Não marcar PASS sem executar.
+
+======================================================================
+34. DOCUMENTAÇÃO PÓS-IMPLEMENTAÇÃO
+======================================================================
+
+Preservar histórico em docs/versions/.
+
+Criar versão canônica nova, por exemplo:
+
+docs/versions/v06-multitenant-core-ready/
+
+Incluir documentação necessária para representar o estado realmente implementado.
+
+Atualizar:
+
+docs/CURRENT.md
+
+somente depois dos critérios de aceite passarem.
+
+Registrar no novo STATUS:
+
+CORE_READINESS=<resultado real>
+GLOBAL_STANDARD_IMPLEMENTATION=NOT_STARTED
+
+Atualizar feature states somente com evidência real.
+
+Não alterar preços/planos/limites aprovados.
+
+======================================================================
+35. GLOBAL STANDARD v01 — SOMENTE PREPARAÇÃO
+======================================================================
+
+O padrão global já está aprovado no ecossistema:
+
+- PlanCatalog;
+- EntitlementService;
+- FeatureGating;
+- Limits;
+- DemoMode;
+- SubscriptionStatus;
+- TenantOverrides;
+- ManualPlanAssignment;
+- downgrade preservando dados;
+- Entitlement != FeatureFlag;
+- segurança não é Premium.
+
+NÃO implementar esses componentes neste GOAL.
+
+Ao concluir o core, apenas documentar que a vertical está pronta ou não para o GOAL seguinte.
+
+Não criar biblioteca compartilhada/npm global.
+
+======================================================================
+36. OUT OF SCOPE
+======================================================================
+
+Explicitamente fora:
+
+- PlanCatalog;
+- planId comercial;
+- SubscriptionStatus;
+- trialUntil;
+- EntitlementService;
+- canUse;
+- getLimit;
+- TenantOverrides;
+- ManualPlanAssignment;
+- DemoMode comercial;
+- gating por plano;
+- limites por plano;
+- upgrade/downgrade comercial;
+- testes Essencial/Pro/Premium/Demo;
+- billing;
+- gateway;
+- checkout de assinatura;
+- webhooks;
+- dunning;
+- marketplace;
+- pacote npm global;
+- custom domain automático;
+- multi-unidade;
+- delivery transversal;
+- KDS novo;
+- caixa/financeiro Pro;
+- cupons Pro;
+- relatórios Pro;
+- estoque/CMV Premium;
+- relatórios Premium;
+- automações Premium;
+- integração paga de WhatsApp;
+- qualquer serviço pago sem aprovação.
+
+======================================================================
+37. ORDEM DE EXECUÇÃO
+======================================================================
+
+Siga esta ordem para reduzir regressões:
+
+1. materializar/confirmar a base v05 no workspace;
+2. instalar dependências e executar baseline de test/lint/build;
+3. implementar Auth context;
+4. implementar membership resolution;
+5. implementar RBAC + guards;
+6. endurecer tenant resolver;
+7. materializar tenant-alpha/tenant-beta para emulator/test;
+8. fortalecer Firestore Rules;
+9. fortalecer Storage Rules;
+10. implementar Rules tests;
+11. concluir Platform Owner;
+12. concluir catálogo/admin de catálogo;
+13. concluir storefront;
+14. concluir carrinho;
+15. concluir checkout;
+16. concluir order service/state machine;
+17. concluir tracking;
+18. concluir delivery/driver/code;
+19. integrar AuditLog;
+20. executar testes unitários;
+21. executar testes de integração;
+22. executar Rules tests;
+23. executar QA manual;
+24. executar lint/build final;
+25. atualizar documentação técnica canônica v06;
+26. executar readiness gate final;
+27. com o sistema estabilizado, executar a FASE FINAL DE DOCUMENTAÇÃO VISUAL;
+28. capturar screenshots reais;
+29. atualizar/renderizar diagramas técnicos;
+30. gerar visuais conceituais claramente separados das screenshots;
+31. atualizar estrutura/manifestos de leads sem inventar leads;
+32. executar docs:diagrams;
+33. executar docs:check;
+34. executar docs:leads quando existir/for aplicável;
+35. somente então fechar o relatório final.
+
+Não começar o item seguinte se um problema P0 do item atual comprometer segurança/tenant isolation.
+
+A ordem documental obrigatória no fim é:
+
+IMPLEMENTAR CORE
+→ MIGRAR/SEED DE TESTE
+→ TESTAR
+→ VALIDAR TENANT A × B
+→ BUILD
+→ DOCUMENTAR
+→ CAPTURAR SCREENSHOTS REAIS
+→ ATUALIZAR DIAGRAMAS
+→ GERAR VISUAIS CONCEITUAIS
+→ ATUALIZAR MANIFESTOS
+→ docs:check
+
+======================================================================
+38. CRITÉRIOS DE ACEITE
+======================================================================
+
+O GOAL somente pode ser declarado concluído quando:
+
+- a codebase v05 foi preservada/evoluída, não reconstruída sem necessidade;
+- Firebase Auth funciona;
+- membership resolution funciona;
+- RBAC está aplicado;
+- /admin exige platform_owner;
+- painel do tenant exige membership autorizada;
+- tenant resolver está validado;
+- tenant-alpha e tenant-beta coexistem;
+- cross-tenant read/write é bloqueado;
+- Firestore Rules tests existem e passam;
+- Storage tenant-aware está protegido;
+- Platform Owner possui fluxo operacional mínimo;
+- catálogo real é tenant-scoped;
+- personalização de sorveteria funciona;
+- carrinho funciona e não vaza entre tenants;
+- checkout cria pedido;
+- double-submit não duplica pedido;
+- order state machine rejeita transições inválidas;
+- tracking consulta pedido real com projeção pública segura;
+- delivery simples funciona;
+- driver só opera entrega autorizada;
+- delivery confirmation code é separado do publicCode e single-use;
+- audit log cobre as ações críticas implementadas;
+- npm run test passa;
+- npm run lint passa;
+- npm run build passa;
+- npm run test:rules passa;
+- nenhum preço/limite aprovado foi alterado;
+- nenhum entitlement/billing foi implementado prematuramente;
+- docs/CURRENT.md aponta para o estado realmente vigente;
+- DIAGRAMS_MANIFEST.md existe e referencia somente diagramas reais/atuais;
+- LEADS_MANIFEST.md existe, mesmo que registre zero leads confirmados;
+- screenshots reais das principais telas implementadas existem quando tecnicamente possível;
+- screenshots reais estão separadas de imagens conceituais;
+- GENERATED_VISUALS.md identifica explicitamente cada visual como real ou idealizado;
+- diagramas relevantes possuem fonte editável e versão renderizada;
+- FIREBASE_STRUCTURE.md representa a estrutura Firebase real utilizada;
+- PROJECT_STRUCTURE.md representa a estrutura real do projeto;
+- SCREENS.md referencia apenas telas/screenshots que realmente existem;
+- docs:check passa, ou qualquer bloqueio externo real está documentado sem falso positivo.
+
+======================================================================
+39. READINESS FINAL
+======================================================================
+
+Ao final, avaliar apenas estes requisitos:
+
+A. tenant resolver confiável
+B. isolamento Tenant A × Tenant B
+C. memberships/RBAC
+D. Security Rules/backend tenant-aware
+E. Platform Owner
+F. fonte de verdade definida
+G. feature states auditados
+H. pricing/feature matrix aprovada
+
+Para cada um registrar:
+
+PASS
+PARTIAL
+FAIL
+NAO_APLICAVEL
+
+Se todos os requisitos obrigatórios estiverem em PASS:
+
+CORE_READINESS=READY_FOR_GLOBAL_STANDARD_IMPLEMENTATION
+
+Caso contrário:
+
+CORE_READINESS=NEEDS_MULTITENANT_CORE_FIRST
+
+Não iniciar automaticamente o próximo GOAL.
+
+======================================================================
+40. RELATÓRIO FINAL
+======================================================================
+
+Ao terminar, retornar de forma objetiva:
+
+1. source/baseline utilizado;
+2. arquivos alterados/adicionados;
+3. Auth;
+4. memberships/RBAC;
+5. tenant resolver;
+6. Platform Owner;
+7. Tenant A × Tenant B;
+8. Firestore/Storage Rules;
+9. catálogo;
+10. carrinho;
+11. checkout;
+12. pedidos;
+13. tracking;
+14. delivery;
+15. audit logs;
+16. testes;
+17. lint/build;
+18. blockers/NEEDS_USER_ACTION;
+19. readiness final;
+20. documentação criada;
+21. screenshots reais capturadas;
+22. diagramas atualizados/renderizados;
+23. visuais conceituais gerados;
+24. manifestos de docs/leads atualizados;
+25. resultado de docs:diagrams / docs:check / docs:leads;
+26. itens explicitamente mantidos fora do escopo.
+
+Não declarar produção-ready sem evidência.
+
+======================================================================
+41. FASE FINAL OBRIGATÓRIA — DOCUMENTAÇÃO VISUAL, DIAGRAMAS E LEADS
+======================================================================
+
+Esta fase é executada SOMENTE DEPOIS de:
+
+- implementação principal;
+- migração/seeds necessários;
+- testes;
+- validação Tenant A × Tenant B;
+- build;
+- readiness técnico do core.
+
+Ela segue oficialmente o padrão:
+
+SAAS_PADRAO_DOCS_LEADS_IMAGENS_GERADAS.md
+
+Não transformar esta fase em redesign do produto.
+Não reabrir decisões comerciais.
+Não substituir screenshot real por mockup.
+Não inventar leads.
+Não apresentar imagem conceitual como implementação existente.
+
+Existem três categorias diferentes e obrigatoriamente separadas:
+
+1. SCREENSHOT REAL
+   = prova do sistema implementado.
+
+2. DIAGRAMA
+   = representação técnica do sistema real.
+
+3. IMAGEM GERADA / CONCEITUAL
+   = visão de produto, direção de design ou apresentação comercial.
+
+Nunca misturar essas categorias.
+
+----------------------------------------------------------------------
+41.1. ESTRUTURA DOCUMENTAL CANÔNICA
+----------------------------------------------------------------------
+
+Ao criar a nova versão pós-implementação, usar como alvo algo como:
+
+docs/
+├── CURRENT.md
+├── DIAGRAMS_MANIFEST.md
+├── LEADS_MANIFEST.md
+│
+└── versions/
+    └── v06-multitenant-core-ready/
+        ├── README.md
+        ├── STATUS.md
+        ├── ARCHITECTURE.md
+        ├── DATA_MODEL.md
+        ├── SECURITY.md
+        ├── FIREBASE_STRUCTURE.md
+        ├── PROJECT_STRUCTURE.md
+        ├── SCREENS.md
+        ├── GENERATED_VISUALS.md
+        ├── LEADS_OVERVIEW.md
+        │
+        ├── diagrams/
+        │   ├── source/
+        │   └── rendered/
+        │
+        ├── screenshots/
+        │
+        ├── generated/
+        │   ├── concepts/
+        │   ├── mockups/
+        │   ├── lead-adapted/
+        │   └── covers/
+        │
+        └── leads/
+            └── <lead-slug>/
+                ├── LEAD_CONTEXT.md
+                ├── LEAD_REFERENCE_SUMMARY.md
+                ├── LEAD_VISUAL_DIRECTION.md
+                ├── captures/
+                ├── assets/
+                └── generated/
+
+Se a versão final usar outro número/nome por causa do estado real do repo:
+- preserve o padrão de estrutura;
+- atualize docs/CURRENT.md para apontar para a versão realmente vigente;
+- não sobrescreva histórico anterior.
+
+----------------------------------------------------------------------
+41.2. PROJECT_STRUCTURE.md
+----------------------------------------------------------------------
+
+Documentar a estrutura REAL do projeto depois da implementação.
+
+Incluir:
+
+- entrypoints;
+- rotas;
+- contexts/providers;
+- services/repositories;
+- domain models;
+- auth;
+- memberships/RBAC;
+- tenant resolver;
+- Firebase;
+- tests;
+- docs;
+- scripts;
+- áreas pública, tenant, driver e Platform Owner.
+
+Não documentar diretórios imaginários.
+
+----------------------------------------------------------------------
+41.3. FIREBASE_STRUCTURE.md
+----------------------------------------------------------------------
+
+Como Firebase é parte real da stack, criar/atualizar:
+
+docs/versions/<versao>/FIREBASE_STRUCTURE.md
+
+Documentar o que realmente existir:
+
+- Auth;
+- claims quando realmente usados;
+- tenants;
+- memberships;
+- catálogo;
+- orders;
+- deliveries;
+- audit logs;
+- paths de Storage;
+- Rules;
+- indexes;
+- Emulator;
+- qualquer backend confiável realmente adotado.
+
+Distinguir claramente:
+
+REAL
+de
+PLANEJADO / FUTURO.
+
+Não documentar Entitlements/PlanCatalog como implementados neste GOAL.
+
+----------------------------------------------------------------------
+41.4. DIAGRAMAS TÉCNICOS
+----------------------------------------------------------------------
+
+Antes de criar novos diagramas:
+
+1. localizar diagramas existentes;
+2. preservar os corretos;
+3. atualizar somente os afetados;
+4. criar fonte editável quando faltar;
+5. renderizar a versão atual.
+
+Preferir:
+
+Mermaid
++
+SVG
+
+quando adequado.
+
+Criar somente diagramas úteis à Sorveteria.
+
+Conjunto esperado quando realmente aplicável:
+
+- system-context.mmd / .svg;
+- multitenant-architecture.mmd / .svg;
+- firebase-data-model.mmd / .svg;
+- auth-rbac.mmd / .svg;
+- order-flow.mmd / .svg;
+- delivery-flow.mmd / .svg;
+- deployment.mmd / .svg.
+
+Não criar quantidade arbitrária para preencher pasta.
+
+Os diagramas devem representar o estado REAL após implementação.
+
+Criar/atualizar:
+
+docs/DIAGRAMS_MANIFEST.md
+
+Para cada diagrama registrar pelo menos:
+
+- nome;
+- objetivo;
+- source;
+- rendered;
+- status;
+- versão;
+- se representa estado real.
+
+----------------------------------------------------------------------
+41.5. SCREENSHOTS REAIS
+----------------------------------------------------------------------
+
+Se o sistema puder ser executado:
+
+1. subir ambiente local/emulator/demo;
+2. usar dados de demonstração seguros;
+3. abrir telas reais;
+4. capturar screenshots reais;
+5. salvar em:
+
+docs/versions/<versao>/screenshots/
+
+Prioridade para esta vertical:
+
+- landing SaaS;
+- storefront público do tenant;
+- cardápio;
+- personalização de produto;
+- carrinho;
+- checkout;
+- tracking;
+- login;
+- painel Tenant Owner;
+- administração de catálogo;
+- tela do driver;
+- Platform Owner.
+
+Quando fizer sentido:
+- desktop;
+- mobile.
+
+Não capturar ou fabricar screenshot de tela que não existe.
+
+Se uma tela não puder ser capturada:
+- registrar explicitamente em SCREENS.md;
+- não criar mockup e colocá-lo em screenshots/.
+
+SCREENS.md deve diferenciar:
+
+IMPLEMENTADA + SCREENSHOT_REAL
+IMPLEMENTADA + SCREENSHOT_PENDENTE
+PLANEJADA
+CONCEITUAL
+
+----------------------------------------------------------------------
+41.6. IMAGENS GERADAS / CONCEITUAIS
+----------------------------------------------------------------------
+
+Criar uma pequena base visual útil da vertical em:
+
+docs/versions/<versao>/generated/
+
+Categorias:
+
+generated/concepts/
+generated/mockups/
+generated/lead-adapted/
+generated/covers/
+
+Objetivo:
+mostrar visão de produto, não provar implementação.
+
+Criar somente material útil, sem dezenas de imagens.
+
+Prioridade conceitual para Sorveteria:
+
+- visão geral do produto;
+- dashboard/painel idealizado;
+- experiência pública/mobile idealizada;
+- capa/apresentação da plataforma.
+
+Respeitar:
+- identidade já adotada;
+- white-label;
+- domínio de sorveteria;
+- componentes e padrões reais quando possível.
+
+Não redesenhar completamente algo aprovado sem necessidade.
+
+Se o ambiente do Codex não possuir gerador de imagem:
+- NÃO fingir que gerou PNG fotorealista;
+- é aceitável criar arte conceitual reproduzível em SVG/HTML/CSS quando útil;
+- ou registrar NEEDS_USER_ACTION para geração externa;
+- GENERATED_VISUALS.md deve deixar isso explícito.
+
+Nunca copiar uma imagem conceitual para screenshots/.
+
+----------------------------------------------------------------------
+41.7. GENERATED_VISUALS.md
+----------------------------------------------------------------------
+
+Criar/atualizar:
+
+docs/versions/<versao>/GENERATED_VISUALS.md
+
+Para cada visual registrar:
+
+- arquivo;
+- tipo:
+  - concept
+  - mockup
+  - lead-adapted
+  - cover
+- objetivo;
+- base;
+- REAL ou IDEALIZADO;
+- lead associado, quando houver;
+- caminho.
+
+Exemplo de regra:
+
+Imagem conceitual = IDEALIZADO.
+Screenshot do sistema = não pertence a GENERATED_VISUALS.md como “prova”.
+
+----------------------------------------------------------------------
+41.8. LEADS — NÃO INVENTAR
+----------------------------------------------------------------------
+
+Criar/atualizar:
+
+docs/LEADS_MANIFEST.md
+docs/versions/<versao>/LEADS_OVERVIEW.md
+
+Primeiro verificar SOMENTE documentação existente desta vertical.
+
+Se já houver lead REAL e explicitamente documentado:
+- preservar;
+- organizar;
+- não perder contexto;
+- não inventar fatos adicionais;
+- migrar/referenciar capturas/assets existentes quando seguro;
+- criar pasta canônica do lead.
+
+Estrutura:
+
+docs/versions/<versao>/leads/<lead-slug>/
+├── LEAD_CONTEXT.md
+├── LEAD_REFERENCE_SUMMARY.md
+├── LEAD_VISUAL_DIRECTION.md
+├── captures/
+├── assets/
+└── generated/
+
+IMPORTANTE PARA ESTA VERTICAL:
+
+“Sol de Verão” já foi usado historicamente como tenant/caso de referência do produto.
+
+NÃO promover automaticamente isso para “lead real” ou “cliente real”.
+
+Somente criar pasta de lead para Sol de Verão se a documentação existente o classificar explicitamente como lead real.
+
+Se NÃO houver lead real confirmado:
+- manter LEADS_MANIFEST.md válido com zero leads;
+- manter LEADS_OVERVIEW.md válido com zero leads;
+- não inventar empresa, contato, CNPJ, Instagram, telefone ou negociação.
+
+----------------------------------------------------------------------
+41.9. MATERIAL VISUAL POR LEAD
+----------------------------------------------------------------------
+
+Somente quando houver lead confirmado na documentação.
+
+Para lead existente:
+
+- preservar LEAD_CONTEXT;
+- resumir referências já salvas;
+- registrar direção visual;
+- organizar captures/assets;
+- gerar/adicionar material conceitual adaptado quando a ferramenta permitir;
+- manter esse material em `lead-adapted/` e/ou `<lead>/generated/`;
+- nunca apresentar isso como tela real implementada.
+
+Não pesquisar/inventar lead novo nesta fase.
+
+----------------------------------------------------------------------
+41.10. MANIFESTOS
+----------------------------------------------------------------------
+
+Criar/atualizar:
+
+docs/DIAGRAMS_MANIFEST.md
+docs/LEADS_MANIFEST.md
+
+Também atualizar:
+
+docs/versions/<versao>/GENERATED_VISUALS.md
+docs/versions/<versao>/SCREENS.md
+docs/versions/<versao>/LEADS_OVERVIEW.md
+
+Todos os caminhos citados devem existir ou ser explicitamente marcados como pendentes/bloqueados.
+
+Não deixar manifesto apontando para arquivo inexistente.
+
+----------------------------------------------------------------------
+41.11. AUTOMAÇÃO DE DOCUMENTAÇÃO
+----------------------------------------------------------------------
+
+Quando compatível com a stack, adicionar scripts:
+
+npm run docs:diagrams
+npm run docs:check
+
+Opcional quando houver leads estruturados:
+
+npm run docs:leads
+
+`docs:diagrams`:
+- renderiza fontes Mermaid;
+- atualiza SVGs sem destruir sources.
+
+`docs:check` deve validar pelo menos:
+
+- docs/CURRENT.md aponta para versão existente;
+- docs obrigatórios da versão vigente existem;
+- ARCHITECTURE.md existe;
+- DATA_MODEL.md existe;
+- SECURITY.md existe;
+- FIREBASE_STRUCTURE.md existe;
+- PROJECT_STRUCTURE.md existe;
+- SCREENS.md existe;
+- GENERATED_VISUALS.md existe;
+- LEADS_OVERVIEW.md existe;
+- DIAGRAMS_MANIFEST.md existe;
+- LEADS_MANIFEST.md existe;
+- cada source de diagrama referenciado existe;
+- cada rendered de diagrama referenciado existe;
+- screenshots referenciadas existem;
+- imagens conceituais referenciadas existem;
+- links/caminhos markdown locais importantes existem.
+
+`docs:leads`, quando usado:
+- valida leads listados;
+- valida pasta do lead;
+- valida LEAD_CONTEXT.md;
+- valida manifests;
+- valida captures/generated quando referenciados.
+
+Não fazer `docs:check` passar ignorando arquivos ausentes.
+
+----------------------------------------------------------------------
+41.12. VALIDAÇÃO VISUAL/DOCUMENTAL
+----------------------------------------------------------------------
+
+Antes de concluir o GOAL:
+
+executar, quando disponíveis:
+
+npm run docs:diagrams
+npm run docs:check
+npm run docs:leads
+
+Também verificar manualmente:
+
+- screenshot real está em screenshots/;
+- diagrama está em diagrams/;
+- imagem conceitual está em generated/;
+- material de lead está em leads/;
+- nenhum mockup está rotulado como implementação real;
+- nenhum screenshot falso foi criado;
+- nenhum lead foi inventado.
+
+Se screenshots forem tecnicamente impossíveis por bloqueio de ambiente:
+- registrar o motivo em STATUS.md/SCREENS.md;
+- não substituir por imagem conceitual fingindo screenshot.
+
+----------------------------------------------------------------------
+41.13. CRITÉRIO DE ACEITE DA FASE DOCUMENTAL
+----------------------------------------------------------------------
+
+A fase documental somente termina quando houver:
+
+CÓDIGO
++
+DOCS TÉCNICOS
++
+FIREBASE DOCUMENTADO
++
+DIAGRAMAS EDITÁVEIS/RENDERIZADOS
++
+SCREENSHOTS REAIS QUANDO TECNICAMENTE POSSÍVEL
++
+IMAGENS CONCEITUAIS CLARAMENTE IDENTIFICADAS
++
+ESTRUTURA DE LEADS
++
+MANIFESTOS CONSISTENTES
+
+Essa fase NÃO altera:
+
+- CORE_FIRST;
+- pricing aprovado;
+- distribuição de features;
+- limites aprovados;
+- escopo comercial;
+- Global Standard v01;
+- deferreds.
+
+Ela apenas completa o pacote documental/visual do estado realmente implementado.
+
+======================================================================
+42. REGRA FINAL
+======================================================================
+
+Não transformar este GOAL em nova auditoria.
+
+Ler os arquivos existentes é necessário para implementar, mas o trabalho desta rodada é EXECUÇÃO.
+
+Não reconstruir o produto.
+Não reabrir decisões comerciais.
+Não implementar o Global Standard v01 antes do core.
+Não criar biblioteca global.
+Não ativar billing.
+
+Objetivo único:
+
+EVOLUIR A BASE REAL V05
+→ COMPLETAR CORE MULTI-TENANT
+→ COMPLETAR ESSENCIAL END-TO-END
+→ PASSAR READINESS GATE
+→ DOCUMENTAR O ESTADO REAL
+→ CAPTURAR SCREENSHOTS REAIS
+→ ATUALIZAR DIAGRAMAS
+→ GERAR VISUAIS CONCEITUAIS
+→ ORGANIZAR LEADS SEM INVENTAR
+→ VALIDAR DOCS
+→ PARAR
+
+Próximo GOAL, somente depois:
+GLOBAL STANDARD v01.

@@ -1,0 +1,30 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "tenants",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "slug", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "deliveries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

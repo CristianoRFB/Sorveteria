@@ -1,0 +1,27 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function isPlatformOwner() {
+      return signedIn() && request.auth.token.platform_owner == true;
+    }
+    function membershipPath(tenantId) {
+      return /databases/(default)/documents/memberships/$(tenantId + "_" + request.auth.uid);
+    }
+    function activeMember(tenantId) {
+      return signedIn()
+        && firestore.exists(membershipPath(tenantId))
+        && firestore.get(membershipPath(tenantId)).data.status == "active";
+    }
+
+    match /tenants/{tenantId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isPlatformOwner() || activeMember(tenantId);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

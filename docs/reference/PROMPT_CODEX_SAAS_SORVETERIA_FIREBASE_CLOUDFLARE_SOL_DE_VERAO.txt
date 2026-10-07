@@ -1,0 +1,1191 @@
+PROMPT DIRETO PARA OPENAI CODEX — SaaS MULTI-TENANT WHITE-LABEL PARA SORVETERIAS
+CASO DE REFERÊNCIA: SORVETERIA SOL DE VERÃO — SANTA FÉ DO SUL/SP
+INFRA: FIREBASE + CLOUDFLARE
+OBJETIVO: CRIAR A FUNDAÇÃO REAL DO SISTEMA, IMPLEMENTAR O NÚCLEO E PUBLICAR QUANDO O CLOUDFLARE ESTIVER AUTENTICADO
+
+======================================================================
+0. REGRA PRINCIPAL
+======================================================================
+
+Trabalhe DIRETAMENTE no projeto atual de sorveteria.
+
+Este projeto NÃO é o projeto de Açaí + Sabor.
+
+O projeto de Açaí + Sabor pode ser usado SOMENTE como base técnica de referência para reaproveitar componentes, arquitetura, lógica e módulos saudáveis.
+
+O domínio final deve ser:
+
+SaaS B2B2C MULTI-TENANT WHITE-LABEL PARA SORVETERIAS.
+
+Tenant/caso comercial inicial de referência:
+
+SORVETERIA SOL DE VERÃO
+Santa Fé do Sul/SP.
+
+Não invente dados reais da empresa que não tenham sido confirmados.
+
+======================================================================
+1. FIREBASE JÁ DEFINIDO
+======================================================================
+
+Use ESTE projeto Firebase como backend principal:
+
+```ts
+import { initializeApp } from "firebase/app";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB4ijp_0YZSe6KU4EoelTfg1NZeg9Uhe5Y",
+  authDomain: "rifa-96b00.firebaseapp.com",
+  projectId: "rifa-96b00",
+  storageBucket: "rifa-96b00.firebasestorage.app",
+  messagingSenderId: "371151032926",
+  appId: "1:371151032926:web:2d93b4f8a6b47e9df05acf"
+};
+
+const app = initializeApp(firebaseConfig);
+```
+
+Observações:
+
+- o nome antigo do projectId (`rifa-96b00`) é apenas um identificador técnico legado;
+- NÃO renomear/recriar o projeto Firebase apenas por causa disso;
+- NÃO criar um Firebase por tenant;
+- o multi-tenancy será feito na aplicação/dados;
+- não expor segredos administrativos;
+- a configuração web do Firebase pode existir no frontend, mas segurança DEVE estar nas Rules/authorization;
+- não incluir service-account real no repositório.
+
+======================================================================
+2. CLOUDFLARE
+======================================================================
+
+O usuário vai deixar o Cloudflare autenticado e com o app/projeto já criado.
+
+Sua obrigação:
+
+1. detectar a configuração existente;
+2. não criar outro projeto Cloudflare sem necessidade;
+3. não sobrescrever configuração válida de outro app;
+4. preparar build;
+5. preparar deploy;
+6. publicar quando o ambiente estiver autenticado e o app correto estiver identificado;
+7. validar a URL publicada;
+8. testar deep links/refresh/rotas após deploy.
+
+Se o deploy estiver bloqueado por login/intervenção:
+
+- NÃO pare o restante do trabalho;
+- continue implementação, testes e build;
+- registre exatamente o que falta;
+- retorne ao deploy se a autenticação ficar disponível.
+
+======================================================================
+3. INSPEÇÃO INICIAL OBRIGATÓRIA
+======================================================================
+
+Antes de programar:
+
+- leia `AGENTS.md`, se existir;
+- leia README;
+- execute `git status`;
+- identifique branch;
+- identifique remotes;
+- identifique stack atual;
+- identifique estrutura do projeto;
+- identifique Firebase já configurado;
+- identifique Cloudflare config;
+- identifique rotas;
+- identifique auth;
+- identifique banco;
+- identifique regras;
+- identifique testes;
+- identifique design system;
+- identifique se há código reaproveitado do projeto de Açaí.
+
+Não use `git reset --hard`.
+Não destrua mudanças existentes.
+Não sobrescreva arquivos sem entender a função.
+
+======================================================================
+4. REAPROVEITAMENTO DO PROJETO DE AÇAÍ
+======================================================================
+
+Se houver acesso ao projeto/repositório de Açaí + Sabor:
+
+audite antes de copiar.
+
+Classifique módulos em:
+
+A. REUTILIZÁVEL DIRETAMENTE
+B. REUTILIZÁVEL APÓS ADAPTAÇÃO
+C. ESPECÍFICO DE AÇAÍ — NÃO COPIAR
+D. OBSOLETO/QUEBRADO
+E. INSEGURO
+
+Priorize reaproveitamento de:
+
+- autenticação;
+- providers;
+- design system;
+- carrinho;
+- checkout;
+- pedidos;
+- delivery;
+- tracking;
+- código de pedido;
+- código de entrega;
+- clientes;
+- admin;
+- caixa;
+- financeiro;
+- Firebase;
+- Cloudflare;
+- testes;
+- utilitários;
+- tratamento de erros.
+
+Não copiar cegamente:
+
+- “Açaí + Sabor”;
+- “monte seu açaí”;
+- categorias de açaí;
+- imagens de açaí;
+- seeds;
+- branding;
+- IDs;
+- paths;
+- single-tenant assumptions;
+- configs de produção do outro projeto.
+
+======================================================================
+5. ARQUITETURA DE PAPÉIS
+======================================================================
+
+Implemente pelo menos:
+
+1. PLATFORM_ADMIN
+2. TENANT_OWNER
+3. CUSTOMER
+4. DRIVER
+
+======================================================================
+6. PLATFORM_ADMIN
+======================================================================
+
+O proprietário da plataforma precisa ter acesso GLOBAL.
+
+Pode:
+
+- criar tenant;
+- editar tenant;
+- suspender tenant;
+- reativar tenant;
+- entrar no contexto de qualquer tenant;
+- alterar branding;
+- alterar catálogo;
+- alterar usuários;
+- alterar pedidos;
+- alterar clientes;
+- alterar entregadores;
+- alterar caixa;
+- alterar financeiro;
+- alterar configurações;
+- visualizar logs;
+- corrigir dados;
+- administrar módulos.
+
+Ações cross-tenant importantes devem ser auditadas.
+
+A UI precisa mostrar claramente quando o Platform Admin estiver atuando dentro de um tenant.
+
+======================================================================
+7. TENANT_OWNER
+======================================================================
+
+O dono da sorveteria cuida SOMENTE do próprio negócio.
+
+Pode:
+
+- editar dados da sorveteria;
+- branding;
+- logo;
+- catálogo;
+- categorias;
+- sabores;
+- produtos;
+- tamanhos;
+- recipientes;
+- grupos de opções;
+- adicionais;
+- preços;
+- disponibilidade;
+- promoções;
+- pedidos;
+- clientes;
+- entregadores;
+- equipe;
+- horários;
+- delivery;
+- formas de pagamento;
+- Pix;
+- caixa;
+- financeiro;
+- relatórios;
+- configurações.
+
+Não pode acessar outro tenant.
+
+======================================================================
+8. CUSTOMER
+======================================================================
+
+O cliente final deve poder:
+
+- abrir a landing do tenant;
+- navegar no cardápio;
+- buscar produtos;
+- visualizar sabores;
+- personalizar produto;
+- escolher tamanho;
+- escolher recipiente;
+- escolher sabores;
+- escolher adicionais;
+- adicionar ao carrinho;
+- editar carrinho;
+- escolher entrega/retirada;
+- informar endereço;
+- escolher pagamento;
+- finalizar pedido;
+- receber código do pedido;
+- acompanhar status;
+- acompanhar estimativa;
+- consultar entrega;
+- usar como guest quando permitido.
+
+Cliente não acessa admin/financeiro.
+
+======================================================================
+9. DRIVER
+======================================================================
+
+O entregador deve ter interface mobile-first.
+
+Pode ver apenas entregas atribuídas.
+
+Mostrar:
+
+- código do pedido;
+- código/estado da entrega;
+- cliente necessário;
+- endereço;
+- telefone necessário;
+- observações;
+- valor a receber, se aplicável;
+- troco;
+- rota;
+- status.
+
+Ações:
+
+- aceitar/assumir quando permitido;
+- sair para entrega;
+- abrir rota;
+- marcar chegada;
+- inserir código de entrega;
+- concluir entrega;
+- registrar falha/tentativa;
+- retornar pedido.
+
+======================================================================
+10. CÓDIGO DE ENTREGA
+======================================================================
+
+Separar:
+
+CÓDIGO PÚBLICO DO PEDIDO
+e
+CÓDIGO DE CONFIRMAÇÃO DA ENTREGA.
+
+Fluxo:
+
+PEDIDO
+→ PREPARO
+→ PRONTO
+→ DRIVER
+→ SAIU PARA ENTREGA
+→ CHEGOU
+→ CLIENTE INFORMA CÓDIGO
+→ DRIVER INSERE
+→ SISTEMA VALIDA
+→ ENTREGA CONCLUÍDA.
+
+Código deve ser:
+
+- curto;
+- não sequencial trivial;
+- de uso único;
+- associado ao pedido;
+- invalidado após entrega/cancelamento;
+- protegido contra tentativas excessivas.
+
+======================================================================
+11. MULTI-TENANCY
+======================================================================
+
+O sistema deve nascer multi-tenant.
+
+Não fazer single-tenant “por enquanto”.
+
+Requisitos:
+
+- `tenantId` estrutural;
+- TenantContext;
+- memberships;
+- roles;
+- ownership;
+- isolamento de dados;
+- filtros por tenant;
+- Security Rules tenant-aware;
+- logs com tenant;
+- uploads com tenant path;
+- cache sem cross-tenant leak.
+
+Criar pelo menos tenants de teste:
+
+tenant-alpha
+tenant-beta
+
+para provar isolamento.
+
+======================================================================
+12. MODELO DE URL
+======================================================================
+
+Preferência:
+
+/{tenantSlug}
+
+Exemplos conceituais:
+
+/sol-de-verao
+/sol-de-verao/cardapio
+/sol-de-verao/carrinho
+/sol-de-verao/checkout
+/sol-de-verao/pedido/{codigo}
+
+/sol-de-verao/painel
+/sol-de-verao/pedidos
+/sol-de-verao/delivery
+/sol-de-verao/caixa
+/sol-de-verao/financeiro
+/sol-de-verao/configuracoes
+
+Platform Admin:
+
+/admin
+
+Preparar arquitetura para custom domain futuro sem exigir agora.
+
+======================================================================
+13. TENANT RESOLUTION
+======================================================================
+
+Criar resolução central:
+
+URL/host
+→ slug
+→ tenant lookup
+→ tenantId
+→ status
+→ TenantContext
+→ branding
+→ módulos
+→ dados.
+
+Não confiar somente no tenantId enviado pelo navegador.
+
+======================================================================
+14. WHITE-LABEL
+======================================================================
+
+Cada tenant precisa poder configurar:
+
+- nome;
+- logo;
+- favicon;
+- cores;
+- tipografia;
+- radius;
+- hero;
+- banners;
+- imagens;
+- contatos;
+- WhatsApp;
+- endereço;
+- redes sociais;
+- textos;
+- SEO;
+- promoções;
+- footer;
+- seções;
+- catálogo.
+
+Implementar com:
+
+SHARED CORE
++
+DESIGN TOKENS
++
+TENANT CONFIG.
+
+Não criar código duplicado por tenant.
+
+======================================================================
+15. DOMÍNIO DE SORVETERIA
+======================================================================
+
+Modelar adequadamente:
+
+- sabores;
+- produtos;
+- recipientes;
+- tamanhos;
+- grupos de escolha;
+- coberturas;
+- adicionais;
+- combos;
+- bebidas;
+- sobremesas;
+- promoções.
+
+Não replicar cegamente “base/creme/complementos” do projeto de açaí.
+
+Exemplo:
+
+Pote 500 ml
+→ até 3 sabores
+→ cobertura
+→ adicionais.
+
+Casquinha
+→ número de bolas
+→ sabores
+→ cobertura opcional.
+
+Milkshake
+→ tamanho
+→ sabor
+→ adicionais.
+
+A estrutura precisa ser configurável pelo tenant.
+
+======================================================================
+16. LANDING / ÁREA PÚBLICA
+======================================================================
+
+Criar uma experiência pública charmosa, noob-friendly e mobile-first.
+
+Incluir, conforme o tenant:
+
+- hero;
+- marca;
+- status aberto/fechado;
+- destaques;
+- categorias;
+- produtos;
+- promoções;
+- CTA “Ver cardápio”;
+- CTA “Fazer pedido”;
+- delivery/retirada;
+- horário;
+- localização;
+- contato;
+- acompanhar pedido.
+
+A Sol de Verão deve servir como referência visual/demo, sem hardcode estrutural.
+
+======================================================================
+17. CARRINHO / CHECKOUT
+======================================================================
+
+Cliente precisa compreender:
+
+- item;
+- tamanho;
+- sabores;
+- adicionais;
+- quantidade;
+- subtotal;
+- taxa;
+- total.
+
+Checkout em etapas claras:
+
+1. entrega/retirada;
+2. dados;
+3. endereço;
+4. pagamento;
+5. revisão;
+6. confirmar.
+
+Não limpar carrinho antes de persistir pedido com sucesso.
+
+Proteger contra double submit.
+
+======================================================================
+18. STATUS DO PEDIDO
+======================================================================
+
+State machine conceitual:
+
+RECEBIDO
+→ CONFIRMADO
+→ EM PREPARO
+→ PRONTO
+→ AGUARDANDO ENTREGADOR
+→ SAIU PARA ENTREGA
+→ ENTREGUE
+
+Alternativas:
+
+CANCELADO
+PRONTO PARA RETIRADA
+RETIRADO.
+
+Não permitir transições inválidas.
+
+======================================================================
+19. TRACKING
+======================================================================
+
+Cliente precisa:
+
+- receber código público;
+- poder copiar código;
+- ser orientado a guardar;
+- consultar na landing;
+- ver timeline;
+- ver status;
+- ver estimativa;
+- receber atualizações realtime quando possível.
+
+Tempo estimado padrão pode começar com configuração de 15 minutos por tenant, mas deve ser editável.
+
+======================================================================
+20. ADMIN / TENANT PANEL
+======================================================================
+
+Criar painel noob-friendly.
+
+Módulos esperados:
+
+- Dashboard;
+- Pedidos;
+- Preparo/KDS;
+- Catálogo;
+- Clientes;
+- Delivery;
+- Entregadores;
+- Caixa;
+- Financeiro;
+- Relatórios;
+- Equipe;
+- Horários;
+- Configurações;
+- Ajuda.
+
+Não criar dashboard cheio de métricas falsas.
+
+======================================================================
+21. CAIXA
+======================================================================
+
+Implementar base real:
+
+- abrir caixa;
+- saldo inicial;
+- vendas;
+- Pix;
+- dinheiro;
+- cartão;
+- sangria;
+- suprimento;
+- fechamento;
+- divergência;
+- histórico.
+
+Integrar com pedidos/pagamentos.
+
+Evitar duplicidade por retry/double click.
+
+======================================================================
+22. FINANCEIRO
+======================================================================
+
+Implementar base real por tenant:
+
+- entradas;
+- saídas;
+- vendas;
+- taxas;
+- descontos;
+- cancelamentos;
+- estornos;
+- caixa;
+- relatórios;
+- filtros;
+- histórico.
+
+Platform Admin pode consultar qualquer tenant.
+
+Tenant Owner só o próprio.
+
+======================================================================
+23. FIREBASE — ESTRUTURA
+======================================================================
+
+Usar:
+
+- Firebase Auth;
+- Firestore;
+- Storage quando necessário;
+- Security Rules;
+- Indexes;
+- Emulator Suite.
+
+Criar arquivos:
+
+- `firebase.ts` / equivalente;
+- `firebase.json`;
+- `firestore.rules`;
+- `firestore.indexes.json`;
+- `storage.rules` se Storage for usado;
+- `.env.example`;
+- scripts de emulator/test.
+
+Não colocar segredo administrativo no frontend.
+
+======================================================================
+24. MODELO DE DADOS
+======================================================================
+
+Projete algo coerente e documente.
+
+Exemplo conceitual:
+
+tenants/{tenantId}
+memberships/{membershipId}
+users/{userId}
+customers/{customerId}
+drivers/{driverId}
+categories/{categoryId}
+products/{productId}
+optionGroups/{groupId}
+orders/{orderId}
+deliveries/{deliveryId}
+cashSessions/{cashSessionId}
+financialTransactions/{transactionId}
+auditLogs/{auditId}
+
+Pode usar subcollections se fizer mais sentido.
+
+Escolha conscientemente.
+
+======================================================================
+25. SECURITY RULES
+======================================================================
+
+Rules são P0.
+
+Default:
+deny.
+
+Validar:
+
+- public reads limitadas;
+- customer somente próprios dados;
+- Tenant Owner somente tenant próprio;
+- Driver somente entregas autorizadas;
+- Platform Admin via estratégia segura;
+- cross-tenant bloqueado;
+- cliente não altera price;
+- cliente não altera role;
+- cliente não confirma pagamento privilegiado;
+- owner não cria Platform Admin.
+
+Criar testes de Rules.
+
+======================================================================
+26. AUTH
+======================================================================
+
+Implementar scaffold real:
+
+- login;
+- logout;
+- auth provider;
+- auth loading;
+- unauthorized;
+- role resolution;
+- membership resolution;
+- tenant resolution.
+
+Customer pode usar guest flow quando a estratégia permitir.
+
+======================================================================
+27. STORAGE / IMAGENS
+======================================================================
+
+Se usar Firebase Storage:
+
+path tenant-scoped.
+
+Validar:
+
+- MIME;
+- tamanho;
+- ownership;
+- rules.
+
+Exemplo conceitual:
+
+tenants/{tenantId}/products/{productId}/...
+
+Não usar assets de Açaí + Sabor como se fossem oficiais da Sol de Verão.
+
+======================================================================
+28. UX NOOB-FRIENDLY
+======================================================================
+
+Toda tela deve responder:
+
+- onde estou?
+- o que faço?
+- qual ação principal?
+- deu certo?
+- deu errado?
+- como corrijo?
+
+Implementar:
+
+- loading;
+- empty;
+- error;
+- success;
+- feedback;
+- confirmações;
+- textos claros;
+- ajuda contextual.
+
+======================================================================
+29. TUTORIAL / CENTRAL DE AJUDA
+======================================================================
+
+Criar estrutura para:
+
+CUSTOMER:
+- como pedir;
+- como acompanhar;
+- código do pedido;
+- código da entrega;
+- pagamento;
+- entrega/retirada.
+
+TENANT OWNER:
+- primeiro acesso;
+- cadastrar produto;
+- cadastrar sabores;
+- configurar horários;
+- configurar delivery;
+- acompanhar pedidos;
+- caixa;
+- financeiro;
+- entregadores.
+
+Não misturar ajuda de perfis.
+
+======================================================================
+30. TESTES
+======================================================================
+
+Criar/rodar:
+
+- unit;
+- integration;
+- Rules tests;
+- auth;
+- tenant isolation;
+- RBAC;
+- pedido;
+- tracking;
+- delivery code;
+- caixa;
+- financeiro;
+- build;
+- lint;
+- typecheck.
+
+======================================================================
+31. TESTE DE ISOLAMENTO
+======================================================================
+
+Obrigatório provar:
+
+tenant-alpha não lê tenant-beta.
+
+owner-alpha não acessa tenant-beta.
+
+customer-alpha não acessa dados beta.
+
+driver-alpha não acessa entregas beta.
+
+Platform Admin acessa ambos conforme mecanismo autorizado e auditável.
+
+======================================================================
+32. QA MANUAL
+======================================================================
+
+Depois dos testes automáticos:
+
+abra e use o sistema.
+
+Testar:
+
+CUSTOMER:
+landing
+→ catálogo
+→ personalização
+→ carrinho
+→ checkout
+→ pedido
+→ tracking.
+
+TENANT:
+login
+→ catálogo
+→ pedido
+→ preparo
+→ delivery
+→ caixa
+→ financeiro.
+
+DRIVER:
+login
+→ entrega
+→ sair
+→ chegar
+→ código
+→ concluir.
+
+PLATFORM ADMIN:
+login
+→ tenants
+→ entrar em tenant
+→ editar
+→ sair
+→ trocar tenant.
+
+======================================================================
+33. CASOS DE ERRO
+======================================================================
+
+Testar:
+
+- tenant inexistente;
+- tenant suspenso;
+- slug inválido;
+- usuário sem membership;
+- produto indisponível;
+- preço alterado durante checkout;
+- pedido duplicado;
+- pagamento duplicado;
+- loja fechada;
+- endereço inválido;
+- driver errado;
+- código de entrega errado;
+- código já usado;
+- cliente tentando alterar pedido alheio;
+- cross-tenant;
+- Firestore permission denied;
+- offline;
+- timeout.
+
+======================================================================
+34. CLOUDFLARE DEPLOY
+======================================================================
+
+Quando build estiver estável:
+
+1. identificar app Cloudflare existente;
+2. configurar build corretamente;
+3. configurar SPA/deep links;
+4. publicar;
+5. abrir URL final;
+6. testar refresh em rota profunda;
+7. testar tenant slug;
+8. testar admin;
+9. testar mobile;
+10. registrar URL e configuração.
+
+Não criar app duplicado sem necessidade.
+
+======================================================================
+35. DOCUMENTAÇÃO
+======================================================================
+
+Criar/atualizar:
+
+README.md
+
+docs/
+  CURRENT.md
+  ARCHITECTURE.md
+  MULTI_TENANCY.md
+  WHITE_LABEL.md
+  DATA_MODEL.md
+  SECURITY.md
+  FIREBASE.md
+  CLOUDFLARE.md
+  ROLES.md
+  DELIVERY.md
+  TESTS.md
+  DEPLOYMENT.md
+
+Documentar:
+
+- o que já funciona;
+- o que falta;
+- decisões;
+- limitações;
+- setup;
+- scripts.
+
+======================================================================
+36. NÃO HARD-CODAR SOL DE VERÃO
+======================================================================
+
+A Sol de Verão é o tenant de referência.
+
+Ela NÃO deve ser hardcoded no motor.
+
+Dados específicos devem ser seed/demo/config do tenant.
+
+A plataforma precisa aceitar novos tenants sem alteração de código.
+
+======================================================================
+37. NOVO TENANT
+======================================================================
+
+O Platform Admin deve conseguir criar uma nova sorveteria sem:
+
+- clonar repo;
+- criar novo Firebase;
+- criar novo Cloudflare app;
+- alterar código.
+
+Fluxo:
+
+NOVO TENANT
+→ nome
+→ slug
+→ owner
+→ branding
+→ módulos
+→ horários
+→ delivery
+→ catálogo inicial
+→ publicar.
+
+======================================================================
+38. REGRAS DE CUSTO
+======================================================================
+
+Priorizar baixo custo.
+
+Não ativar Blaze automaticamente.
+
+Se uma função exigir billing:
+
+documentar antes.
+
+Não adicionar API paga obrigatória sem necessidade.
+
+O sistema deve operar com o máximo possível no tier atual.
+
+======================================================================
+39. SEGURANÇA
+======================================================================
+
+Não confiar em UI para autorização.
+
+Não deixar role controlável pelo cliente.
+
+Não aceitar tenantId arbitrário como autorização.
+
+Não confiar em total financeiro vindo do browser.
+
+Não expor secrets.
+
+Não usar Rules abertas.
+
+Não usar `allow read, write: if true`.
+
+======================================================================
+40. PRECISÃO FINANCEIRA
+======================================================================
+
+Valores monetários:
+
+usar centavos inteiros ou tipo monetário seguro.
+
+Evitar float binário para cálculo.
+
+======================================================================
+41. RESULTADO FINAL ESPERADO
+======================================================================
+
+Ao terminar esta rodada, o projeto deve estar com:
+
+- base multi-tenant real;
+- white-label real;
+- Firebase configurado;
+- tenant resolution;
+- auth;
+- roles;
+- Security Rules;
+- dois tenants de teste;
+- tenant de referência Sol de Verão como demo/config;
+- landing;
+- catálogo;
+- carrinho;
+- checkout;
+- pedido;
+- tracking;
+- delivery;
+- código de entrega;
+- admin;
+- caixa/financeiro base;
+- docs;
+- testes;
+- build;
+- Cloudflare pronto/publicado quando autenticado.
+
+======================================================================
+42. CICLO DE CORREÇÃO
+======================================================================
+
+Não pare no primeiro build.
+
+Executar:
+
+IMPLEMENTAR
+→ TESTAR
+→ QA
+→ ENCONTRAR BUGS
+→ CORRIGIR
+→ RETESTAR
+→ BUILD
+→ DEPLOY
+→ QA PUBLICADO.
+
+Se encontrar P0/P1 solucionável:
+corrigir antes de declarar pronto.
+
+======================================================================
+43. RELATÓRIO FINAL
+======================================================================
+
+Ao finalizar, retornar:
+
+RESUMO
+
+ARQUITETURA
+
+REUSO DO PROJETO DE AÇAÍ
+
+MULTI-TENANCY
+
+WHITE-LABEL
+
+FIREBASE
+
+AUTH
+
+SECURITY RULES
+
+DATA MODEL
+
+PLATFORM ADMIN
+
+TENANT OWNER
+
+CUSTOMER
+
+DRIVER
+
+CATÁLOGO
+
+CHECKOUT
+
+PEDIDOS
+
+TRACKING
+
+DELIVERY
+
+CÓDIGO DE ENTREGA
+
+CAIXA
+
+FINANCEIRO
+
+TESTES
+
+TENANT ISOLATION TEST
+
+BUILD
+
+CLOUDFLARE
+
+URL PUBLICADA
+
+BUGS ENCONTRADOS
+
+BUGS CORRIGIDOS
+
+ARQUIVOS ALTERADOS
+
+LIMITAÇÕES
+
+PRÓXIMOS PASSOS.
+
+======================================================================
+44. REGRA FINAL
+======================================================================
+
+Não entregue um clone de açaiteria com o nome trocado.
+
+Entregue a fundação real de:
+
+UM SaaS MULTI-TENANT WHITE-LABEL PARA SORVETERIAS
+
+com:
+
+PLATFORM_ADMIN GLOBAL
+TENANT_OWNER ISOLADO
+CUSTOMER COMPRADOR
+DRIVER OPERACIONAL
+
+usando:
+
+FIREBASE
++
+CLOUDFLARE
+
+e tendo:
+
+SORVETERIA SOL DE VERÃO — SANTA FÉ DO SUL/SP
+
+como tenant/caso de referência inicial.
+
+[FIM DO PROMPT]

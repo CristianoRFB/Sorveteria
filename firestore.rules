@@ -1,0 +1,126 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isPlatformOwner() {
+      return signedIn() && request.auth.token.platform_owner == true;
+    }
+    function membershipId(tenantId) {
+      return tenantId + "_" + request.auth.uid;
+    }
+    function membership(tenantId) {
+      return get(/databases/$(database)/documents/memberships/$(membershipId(tenantId))).data;
+    }
+    function activeMember(tenantId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/memberships/$(membershipId(tenantId)))
+        && membership(tenantId).status == "active";
+    }
+    function tenantOwner(tenantId) {
+      return activeMember(tenantId)
+        && membership(tenantId).role == "tenant_owner";
+    }
+    function tenantStaff(tenantId) {
+      return activeMember(tenantId)
+        && membership(tenantId).role in ["tenant_owner", "tenant_admin", "staff", "cashier"];
+    }
+    function tenantDriver(tenantId) {
+      return activeMember(tenantId)
+        && membership(tenantId).role == "driver";
+    }
+    function tenantActive(tenantId) {
+      return get(/databases/$(database)/documents/tenants/$(tenantId)).data.status == "active";
+    }
+
+    match /users/{uid} {
+      allow read, update: if signedIn() && request.auth.uid == uid;
+      allow read, write: if isPlatformOwner();
+      allow create: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /memberships/{id} {
+      allow read: if isPlatformOwner()
+        || (signedIn() && resource.data.userId == request.auth.uid)
+        || (signedIn() && tenantOwner(resource.data.tenantId));
+      allow create, update: if isPlatformOwner()
+        || (signedIn() && request.resource.data.tenantId is string
+            && tenantOwner(request.resource.data.tenantId)
+            && request.resource.data.role != "platform_owner");
+      allow delete: if isPlatformOwner()
+        || (signedIn() && tenantOwner(resource.data.tenantId)
+            && resource.data.role != "tenant_owner");
+    }
+
+    match /tenants/{tenantId} {
+      allow get: if resource.data.status == "active" || isPlatformOwner() || tenantStaff(tenantId);
+      allow list: if resource.data.status == "active";
+      allow create: if isPlatformOwner();
+      allow update: if isPlatformOwner() || tenantOwner(tenantId);
+      allow delete: if false;
+
+      match /categories/{categoryId} {
+        allow read: if tenantActive(tenantId) || tenantStaff(tenantId) || isPlatformOwner();
+        allow write: if tenantStaff(tenantId) || isPlatformOwner();
+      }
+
+      match /products/{productId} {
+        allow read: if tenantActive(tenantId) || tenantStaff(tenantId) || isPlatformOwner();
+        allow write: if tenantStaff(tenantId) || isPlatformOwner();
+      }
+
+      match /tables/{tableId} {
+        allow read: if tenantActive(tenantId) || tenantStaff(tenantId) || isPlatformOwner();
+        allow write: if tenantOwner(tenantId) || isPlatformOwner();
+      }
+
+      match /orders/{orderId} {
+        allow create: if tenantActive(tenantId)
+          && request.resource.data.status == "received"
+          && request.resource.data.tenantId == tenantId;
+        allow read: if isPlatformOwner()
+          || tenantStaff(tenantId)
+          || (signedIn() && resource.data.customerId == request.auth.uid);
+        allow update: if isPlatformOwner() || tenantStaff(tenantId);
+        allow delete: if false;
+      }
+
+      match /publicOrderTracking/{publicCode} {
+        allow read: if tenantActive(tenantId);
+        allow write: if tenantStaff(tenantId) || isPlatformOwner();
+      }
+
+      match /deliveries/{deliveryId} {
+        allow read: if isPlatformOwner()
+          || tenantStaff(tenantId)
+          || (tenantDriver(tenantId) && resource.data.driverId == request.auth.uid);
+        allow update: if isPlatformOwner()
+          || tenantStaff(tenantId)
+          || (tenantDriver(tenantId)
+              && resource.data.driverId == request.auth.uid
+              && request.resource.data.driverId == resource.data.driverId
+              && request.resource.data.tenantId == tenantId);
+        allow create: if isPlatformOwner() || tenantStaff(tenantId);
+        allow delete: if false;
+      }
+
+      match /auditLogs/{auditId} {
+        allow read: if isPlatformOwner() || tenantOwner(tenantId);
+        allow write: if false;
+      }
+
+      match /cashSessions/{sessionId} {
+        allow read, write: if isPlatformOwner() || tenantStaff(tenantId);
+      }
+
+      match /financialTransactions/{transactionId} {
+        allow read: if isPlatformOwner() || tenantOwner(tenantId);
+        allow write: if isPlatformOwner() || tenantOwner(tenantId);
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

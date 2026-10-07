@@ -1,0 +1,55 @@
+{
+  "warning": "DEMO/DEV ONLY — nunca inserir automaticamente em produção",
+  "tenants": [
+    {
+      "id": "tenant-alpha",
+      "slug": "sol-de-verao-demo",
+      "status": "active",
+      "branding": {
+        "displayName": "Sol de Verão — DEMO",
+        "primaryColor": "#6D28D9",
+        "secondaryColor": "#F59E0B",
+        "backgroundColor": "#FFF9F1",
+        "textColor": "#211A2A",
+        "borderRadius": "lg"
+      },
+      "features": {
+        "onlineMenu": true,
+        "pickup": true,
+        "delivery": true,
+        "qrCodes": true,
+        "tableOrdering": false,
+        "kds": true,
+        "cashRegister": true,
+        "finance": true,
+        "coupons": false,
+        "inventory": false
+      }
+    },
+    {
+      "id": "tenant-beta",
+      "slug": "sorveteria-beta-demo",
+      "status": "active",
+      "branding": {
+        "displayName": "Sorveteria Beta — DEMO",
+        "primaryColor": "#0F766E",
+        "secondaryColor": "#FB7185",
+        "backgroundColor": "#F6FFFC",
+        "textColor": "#102A2A",
+        "borderRadius": "md"
+      },
+      "features": {
+        "onlineMenu": true,
+        "pickup": true,
+        "delivery": false,
+        "qrCodes": true,
+        "tableOrdering": true,
+        "kds": false,
+        "cashRegister": true,
+        "finance": true,
+        "coupons": true,
+        "inventory": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #201a2a;
+  background: #fffaf3;
+  font-synthesis: none;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: #fffaf3; }
+a { color: inherit; }
+.marketing, .content, .tenant-page { max-width: 1180px; margin: 0 auto; padding: 48px 24px; }
+.hero, .tenant-hero { padding: 72px 0 48px; }
+.eyebrow { display: inline-block; font-size: .82rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #6d28d9; }
+h1 { font-size: clamp(2.2rem, 6vw, 4.8rem); line-height: .98; max-width: 920px; margin: 16px 0 20px; }
+p { line-height: 1.65; max-width: 720px; }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
+.button { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 18px; border-radius: 14px; border: 1px solid transparent; text-decoration: none; font-weight: 750; cursor: pointer; }
+.primary { background: #6d28d9; color: white; }
+.secondary { background: white; border-color: #d8cfe4; }
+.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-top: 28px; }
+.feature-card, .state-card, .tracking-form { border: 1px solid #eadff0; background: rgba(255,255,255,.88); border-radius: 20px; padding: 22px; box-shadow: 0 14px 40px rgba(50,25,70,.06); }
+.tenant-page { color: var(--tenant-text, #201a2a); background: var(--tenant-bg, #fffaf3); min-height: 100vh; }
+.tenant-page .primary { background: var(--tenant-primary, #6d28d9); }
+.notice { padding: 12px 16px; border-radius: 12px; background: #fff1d6; border: 1px solid #f4ca7a; }
+.muted { color: #6d6572; }
+.tracking-form { display: grid; gap: 10px; max-width: 520px; }
+input { min-height: 46px; border: 1px solid #d8cfe4; border-radius: 12px; padding: 0 14px; font: inherit; }
+.qr-preview { display: block; width: min(320px, 100%); margin-top: 20px; border-radius: 16px; }
+@media (max-width: 640px) {
+  .marketing, .content, .tenant-page { padding: 28px 16px; }
+  .hero, .tenant-hero { padding-top: 40px; }
+}
+
+/* v02 pricing protocol: apresentação explícita como proposta, sem fingir contratação ativa. */
+h2 { font-size: clamp(1.6rem, 3vw, 2.6rem); margin: 14px 0 12px; }
+h3 { margin: 10px 0; font-size: 1.35rem; }
+.pricing-preview { margin-top: 72px; padding-top: 40px; border-top: 1px solid #eadff0; }
+.plan-status { display: inline-block; font-size: .76rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: #6d28d9; }
+.plan-price { display: block; margin-top: 16px; font-size: 1.8rem; }
+.plan-price small { font-size: .85rem; font-weight: 650; color: #6d6572; }
