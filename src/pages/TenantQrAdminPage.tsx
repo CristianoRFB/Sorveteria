@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useTenant } from "@/context/TenantContext";
+import { useTenant } from "@/hooks/useTenant";
 import { generateTenantQrDataUrl } from "@/features/qr/qr";
 
 export function TenantQrAdminPage() {

@@ -1,59 +1,41 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import type { Tenant } from "@/domain/tenant";
 import { resolveTenantBySlug } from "@/services/tenantResolver";
+import { TenantContext } from "@/context/tenantContextValue";
 
-type TenantContextValue = {
-  tenant: Tenant | null;
-  loading: boolean;
-  error: string | null;
-};
-
-const TenantContext = createContext<TenantContextValue | null>(null);
+type Resolution = { slug: string; tenant: Tenant | null; error: string | null };
+import type { Tenant } from "@/domain/tenant";
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const { tenantSlug } = useParams();
-  const [tenant, setTenant] = useState<Tenant | null>(null);
-  const [loading, setLoading] = useState(Boolean(tenantSlug));
-  const [error, setError] = useState<string | null>(null);
+  const [resolution, setResolution] = useState<Resolution | null>(null);
 
   useEffect(() => {
+    if (!tenantSlug) return;
     let active = true;
-
-    if (!tenantSlug) {
-      setTenant(null);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
     resolveTenantBySlug(tenantSlug)
-      .then((resolved) => {
-        if (!active) return;
-        setTenant(resolved);
-        if (!resolved) setError("Sorveteria não encontrada ou indisponível.");
+      .then((tenant) => {
+        if (active) setResolution({
+          slug: tenantSlug,
+          tenant,
+          error: tenant ? null : "Sorveteria não encontrada, suspensa ou indisponível.",
+        });
       })
-      .catch(() => {
-        if (!active) return;
-        setError("Não foi possível carregar esta sorveteria.");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
+      .catch((error: unknown) => {
+        if (active) setResolution({
+          slug: tenantSlug,
+          tenant: null,
+          error: error instanceof Error ? error.message : "Não foi possível carregar esta sorveteria.",
+        });
       });
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [tenantSlug]);
 
-  const value = useMemo(() => ({ tenant, loading, error }), [tenant, loading, error]);
+  const matchesCurrentSlug = Boolean(tenantSlug && resolution?.slug === tenantSlug);
+  const value = useMemo(() => ({
+    tenant: matchesCurrentSlug ? resolution?.tenant ?? null : null,
+    loading: Boolean(tenantSlug) && !matchesCurrentSlug,
+    error: matchesCurrentSlug ? resolution?.error ?? null : null,
+  }), [tenantSlug, matchesCurrentSlug, resolution]);
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
-}
-
-export function useTenant() {
-  const ctx = useContext(TenantContext);
-  if (!ctx) throw new Error("useTenant deve ser usado dentro de TenantProvider");
-  return ctx;
 }

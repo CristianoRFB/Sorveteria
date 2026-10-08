@@ -3,21 +3,44 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() { return request.auth != null; }
-    function isPlatformOwner() {
-      return signedIn() && request.auth.token.platform_owner == true;
-    }
+    function platformOwner() { return signedIn() && request.auth.token.get("platform_owner", false) == true; }
     function membershipPath(tenantId) {
       return /databases/(default)/documents/memberships/$(tenantId + "_" + request.auth.uid);
     }
-    function activeMember(tenantId) {
+    function activeMembership(tenantId) {
       return signedIn()
         && firestore.exists(membershipPath(tenantId))
+        && firestore.get(membershipPath(tenantId)).data.tenantId == tenantId
+        && firestore.get(membershipPath(tenantId)).data.userId == request.auth.uid
         && firestore.get(membershipPath(tenantId)).data.status == "active";
     }
+    function catalogAdmin(tenantId) {
+      return activeMembership(tenantId)
+        && firestore.get(membershipPath(tenantId)).data.role in ["tenant_owner", "tenant_admin", "staff"];
+    }
+    function tenantActive(tenantId) {
+      return firestore.exists(/databases/(default)/documents/tenants/$(tenantId))
+        && firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.status == "active";
+    }
+    function isSafeImage() {
+      return request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches("image/(jpeg|png|webp|gif)");
+    }
 
-    match /tenants/{tenantId}/{allPaths=**} {
-      allow read: if true;
-      allow write: if isPlatformOwner() || activeMember(tenantId);
+    // Only explicitly public branding and catalog assets are readable without a session.
+    match /tenants/{tenantId}/public/{allPaths=**} {
+      allow read: if tenantActive(tenantId);
+      allow create, update: if (platformOwner() || catalogAdmin(tenantId)) && tenantActive(tenantId) && isSafeImage();
+      allow delete: if platformOwner() || catalogAdmin(tenantId);
+    }
+
+    // Internal documents and exports never inherit the public asset policy.
+    match /tenants/{tenantId}/private/{allPaths=**} {
+      allow read: if platformOwner() || activeMembership(tenantId);
+      allow create, update: if (platformOwner() || catalogAdmin(tenantId))
+        && request.resource != null && request.resource.size < 10 * 1024 * 1024;
+      allow delete: if platformOwner() || catalogAdmin(tenantId);
     }
 
     match /{allPaths=**} {

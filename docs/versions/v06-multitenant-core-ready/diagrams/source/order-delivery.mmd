@@ -1,0 +1,18 @@
+flowchart TD
+  A[Catálogo tenant e personalização]
+  B[Carrinho separado por tenant]
+  C[Checkout e dados mínimos]
+  D[Function recalcula preço e cria pedido]
+  E[Tracking público por tenant e publicCode]
+  F[Equipe confirma prepara e atribui driver]
+  G[Driver sai e registra chegada]
+  H[Código single-use confirma entrega]
+  I[Audit registra ação operacional]
+  A --> B
+  B --> C
+  C --> D
+  D --> E
+  D --> F
+  F --> G
+  G --> H
+  H --> I

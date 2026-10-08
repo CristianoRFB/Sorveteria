@@ -17,9 +17,9 @@ export const defaultSorveteriaFeatures: TenantFeatureFlags = {
   delivery: true,
   qrCodes: true,
   tableOrdering: false,
-  kds: true,
-  cashRegister: true,
-  finance: true,
+  kds: false,
+  cashRegister: false,
+  finance: false,
   coupons: false,
   inventory: false,
 };

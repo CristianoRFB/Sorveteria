@@ -1,0 +1,16 @@
+flowchart TD
+  A[Pessoa visitante ou autenticada]
+  B[Firebase Auth e claim confiável]
+  C[Resolver slug e tenant ativo]
+  D[Membership e role do tenant]
+  E[Guards e interface tenant-scoped]
+  F[Firestore com Rules deny-by-default]
+  G[Callable Functions validam e gravam]
+  H[Audit e projeção pública segura]
+  A --> B
+  B --> C
+  C --> D
+  D --> E
+  E --> F
+  E --> G
+  G --> H

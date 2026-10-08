@@ -29,10 +29,23 @@ export type Order = {
   id: string;
   tenantId: string;
   publicCode: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
   customerId?: string;
+  customer: { name: string; phone: string };
   fulfillmentMode: FulfillmentMode;
   status: OrderStatus;
   source: OrderSource;
+  items: Array<{
+    productId: string;
+    name: string;
+    quantity: number;
+    selections: Record<string, string[]>;
+    unitPriceCents: number;
+    lineTotalCents: number;
+  }>;
+  address?: { street: string; number: string; neighborhood: string; reference?: string };
+  paymentMethodId: string;
   money: OrderMoney;
   estimatedMinutes?: number;
 };

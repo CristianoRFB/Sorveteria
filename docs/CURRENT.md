@@ -1,26 +1,19 @@
 # CURRENT
 
-Versão canônica para consolidação global:
+Versão canônica do estado técnico executável:
 
-`docs/versions/v05-global-consolidation-ready/`
+`docs/versions/v06-multitenant-core-ready/`
 
-## Status
+## Estado
 
-- `STATUS=READY_FOR_GLOBAL_CONSOLIDATION`
-- `OPEN_DECISIONS=0`
-- `CODEX_STATUS=READY_FOR_VERTICAL_GOAL_LATER`
-- `PRICING_DECISIONS=APPROVED`
-- `ENTITLEMENTS_IMPLEMENTATION=NOT_STARTED`
-- `GLOBAL_CONSOLIDATION=PENDING_EXECUTION_BY_CENTRAL_CHAT`
+- `CORE_READINESS=READY_FOR_GLOBAL_STANDARD_IMPLEMENTATION`
+- `GLOBAL_STANDARD_IMPLEMENTATION=NOT_STARTED`
+- `BILLING=NOT_IMPLEMENTED`
+- `PRODUCTION_DEPLOYMENT=NOT_PERFORMED`
+- `LEADS_CONFIRMED=0`
 
-## Estrutura canônica
+## Fonte comercial aprovada
 
-1. `DECISIONS_APPROVED.md`
-2. `PRICING_AND_PLANS_APPROVED.md`
-3. `FEATURE_MATRIX_APPROVED.md`
-4. `DELTA_TECNICO.md`
-5. `PRIORIZACAO.md`
-6. `GLOBAL_CONSOLIDATION_HANDOFF.md`
+`docs/versions/v05-global-consolidation-ready/` permanece a fonte de verdade para preços, planos, limites e matriz comercial. A implementação v06 preserva essas decisões sem enforcement comercial.
 
-Versões anteriores permanecem apenas como histórico.
-Nenhuma nova auditoria foi realizada nesta normalização.
+Versões anteriores permanecem como histórico; não iniciar o Global Standard v01 automaticamente.

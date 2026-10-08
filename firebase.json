@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20",
+    "codebase": "default"
+  },
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
@@ -7,9 +12,14 @@
     "rules": "storage.rules"
   },
   "emulators": {
+    "functions": { "port": 5001 },
     "auth": { "port": 9099 },
-    "firestore": { "port": 8088 },
-    "storage": { "port": 9199 },
-    "ui": { "enabled": true, "port": 4000 }
+    "firestore": { "port": 8088, "websocketPort": 9165 },
+    "storage": { "port": 9415 },
+    "eventarc": { "port": 9315 },
+    "tasks": { "port": 9515 },
+    "hub": { "port": 4415 },
+    "logging": { "port": 4515 },
+    "ui": { "enabled": true, "port": 4015 }
   }
 }

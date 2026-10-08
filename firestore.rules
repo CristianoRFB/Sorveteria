@@ -3,120 +3,122 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function isPlatformOwner() {
-      return signedIn() && request.auth.token.platform_owner == true;
+    function platformOwner() {
+      return signedIn() && request.auth.token.get("platform_owner", false) == true;
     }
-    function membershipId(tenantId) {
-      return tenantId + "_" + request.auth.uid;
+    function membershipPath(tenantId) {
+      return /databases/$(database)/documents/memberships/$(tenantId + "_" + request.auth.uid);
     }
-    function membership(tenantId) {
-      return get(/databases/$(database)/documents/memberships/$(membershipId(tenantId))).data;
-    }
-    function activeMember(tenantId) {
+    function canResolveMembership(membershipId) {
+      let path = /databases/$(database)/documents/memberships/$(membershipId);
       return signedIn()
-        && exists(/databases/$(database)/documents/memberships/$(membershipId(tenantId)))
-        && membership(tenantId).status == "active";
+        && request.auth.uid.matches("^[A-Za-z0-9_-]{1,128}$")
+        && membershipId.matches("^.+_" + request.auth.uid + "$")
+        && (!exists(path) || get(path).data.userId == request.auth.uid);
     }
-    function tenantOwner(tenantId) {
-      return activeMember(tenantId)
-        && membership(tenantId).role == "tenant_owner";
+    function hasActiveMembership(tenantId) {
+      return signedIn()
+        && exists(membershipPath(tenantId))
+        && get(membershipPath(tenantId)).data.tenantId == tenantId
+        && get(membershipPath(tenantId)).data.userId == request.auth.uid
+        && get(membershipPath(tenantId)).data.status == "active";
     }
+    function hasRole(tenantId, roles) {
+      return hasActiveMembership(tenantId)
+        && get(membershipPath(tenantId)).data.role in roles;
+    }
+    function tenantOwner(tenantId) { return hasRole(tenantId, ["tenant_owner"]); }
     function tenantStaff(tenantId) {
-      return activeMember(tenantId)
-        && membership(tenantId).role in ["tenant_owner", "tenant_admin", "staff", "cashier"];
+      return hasRole(tenantId, ["tenant_owner", "tenant_admin", "staff", "cashier"]);
     }
-    function tenantDriver(tenantId) {
-      return activeMember(tenantId)
-        && membership(tenantId).role == "driver";
+    function tenantAdmin(tenantId) {
+      return hasRole(tenantId, ["tenant_owner", "tenant_admin"]);
     }
-    function tenantActive(tenantId) {
-      return get(/databases/$(database)/documents/tenants/$(tenantId)).data.status == "active";
+    function tenantDriver(tenantId) { return hasRole(tenantId, ["driver"]); }
+    function tenantIsActive(tenantId) {
+      return exists(/databases/$(database)/documents/tenants/$(tenantId))
+        && get(/databases/$(database)/documents/tenants/$(tenantId)).data.status == "active";
+    }
+    function assignedDriver(tenantId, orderId) {
+      let deliveryPath = /databases/$(database)/documents/tenants/$(tenantId)/deliveries/$(orderId);
+      return tenantDriver(tenantId) && exists(deliveryPath)
+        && get(deliveryPath).data.driverId == request.auth.uid;
     }
 
     match /users/{uid} {
-      allow read, update: if signedIn() && request.auth.uid == uid;
-      allow read, write: if isPlatformOwner();
-      allow create: if signedIn() && request.auth.uid == uid;
+      allow get: if signedIn() && request.auth.uid == uid || platformOwner();
+      allow list: if platformOwner();
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(["displayName", "photoURL", "createdAt", "updatedAt"]);
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["displayName", "photoURL", "updatedAt"]);
+      allow delete: if false;
     }
 
-    match /memberships/{id} {
-      allow read: if isPlatformOwner()
+    match /memberships/{membershipId} {
+      allow get: if platformOwner()
+        || canResolveMembership(membershipId)
         || (signedIn() && resource.data.userId == request.auth.uid)
-        || (signedIn() && tenantOwner(resource.data.tenantId));
-      allow create, update: if isPlatformOwner()
-        || (signedIn() && request.resource.data.tenantId is string
-            && tenantOwner(request.resource.data.tenantId)
-            && request.resource.data.role != "platform_owner");
-      allow delete: if isPlatformOwner()
-        || (signedIn() && tenantOwner(resource.data.tenantId)
-            && resource.data.role != "tenant_owner");
+        || tenantAdmin(resource.data.tenantId);
+      allow list: if platformOwner() || tenantAdmin(resource.data.tenantId);
+      // Memberships mudam por callable backend para manter trilha de auditoria.
+      allow create, update, delete: if false;
     }
 
     match /tenants/{tenantId} {
-      allow get: if resource.data.status == "active" || isPlatformOwner() || tenantStaff(tenantId);
-      allow list: if resource.data.status == "active";
-      allow create: if isPlatformOwner();
-      allow update: if isPlatformOwner() || tenantOwner(tenantId);
-      allow delete: if false;
+      allow get: if platformOwner() || tenantStaff(tenantId) || tenantDriver(tenantId) || resource.data.status == "active";
+      allow list: if platformOwner() || resource.data.status == "active";
+      allow create, update, delete: if false;
+
+      match /settings/{settingsId} {
+        allow get: if platformOwner() || tenantStaff(tenantId) || (tenantIsActive(tenantId) && settingsId == "main");
+        allow list: if false;
+        allow create, update, delete: if false;
+      }
 
       match /categories/{categoryId} {
-        allow read: if tenantActive(tenantId) || tenantStaff(tenantId) || isPlatformOwner();
-        allow write: if tenantStaff(tenantId) || isPlatformOwner();
+        allow read: if platformOwner() || tenantStaff(tenantId) || (tenantIsActive(tenantId) && resource.data.active == true);
+        allow create, update: if false;
+        allow delete: if false;
       }
 
       match /products/{productId} {
-        allow read: if tenantActive(tenantId) || tenantStaff(tenantId) || isPlatformOwner();
-        allow write: if tenantStaff(tenantId) || isPlatformOwner();
-      }
-
-      match /tables/{tableId} {
-        allow read: if tenantActive(tenantId) || tenantStaff(tenantId) || isPlatformOwner();
-        allow write: if tenantOwner(tenantId) || isPlatformOwner();
+        allow read: if platformOwner() || tenantStaff(tenantId) || (tenantIsActive(tenantId) && resource.data.available == true);
+        allow create, update: if false;
+        allow delete: if false;
       }
 
       match /orders/{orderId} {
-        allow create: if tenantActive(tenantId)
-          && request.resource.data.status == "received"
-          && request.resource.data.tenantId == tenantId;
-        allow read: if isPlatformOwner()
-          || tenantStaff(tenantId)
+        allow get: if platformOwner() || tenantStaff(tenantId)
+          || (signedIn() && resource.data.customerId == request.auth.uid)
+          || assignedDriver(tenantId, orderId);
+        allow list: if platformOwner() || tenantStaff(tenantId)
           || (signedIn() && resource.data.customerId == request.auth.uid);
-        allow update: if isPlatformOwner() || tenantStaff(tenantId);
-        allow delete: if false;
+        // Clientes nunca escrevem totais, estados operacionais nem códigos confiáveis.
+        // createOrder/updateOrderStatus executam no backend com Admin SDK.
+        allow create, update, delete: if false;
       }
 
       match /publicOrderTracking/{publicCode} {
-        allow read: if tenantActive(tenantId);
-        allow write: if tenantStaff(tenantId) || isPlatformOwner();
+        allow get: if tenantIsActive(tenantId)
+          && resource.data.publicCode == publicCode;
+        allow list, create, update, delete: if false;
       }
 
       match /deliveries/{deliveryId} {
-        allow read: if isPlatformOwner()
-          || tenantStaff(tenantId)
+        allow get, list: if platformOwner() || tenantStaff(tenantId)
           || (tenantDriver(tenantId) && resource.data.driverId == request.auth.uid);
-        allow update: if isPlatformOwner()
-          || tenantStaff(tenantId)
-          || (tenantDriver(tenantId)
-              && resource.data.driverId == request.auth.uid
-              && request.resource.data.driverId == resource.data.driverId
-              && request.resource.data.tenantId == tenantId);
-        allow create: if isPlatformOwner() || tenantStaff(tenantId);
-        allow delete: if false;
+        allow create, update, delete: if false;
       }
 
       match /auditLogs/{auditId} {
-        allow read: if isPlatformOwner() || tenantOwner(tenantId);
-        allow write: if false;
+        allow get, list: if platformOwner() || tenantOwner(tenantId) || hasRole(tenantId, ["tenant_admin"]);
+        allow create, update, delete: if false;
       }
+    }
 
-      match /cashSessions/{sessionId} {
-        allow read, write: if isPlatformOwner() || tenantStaff(tenantId);
-      }
-
-      match /financialTransactions/{transactionId} {
-        allow read: if isPlatformOwner() || tenantOwner(tenantId);
-        allow write: if isPlatformOwner() || tenantOwner(tenantId);
-      }
+    match /tenantSlugs/{slug} {
+      allow read, write: if false;
     }
 
     match /{document=**} {
