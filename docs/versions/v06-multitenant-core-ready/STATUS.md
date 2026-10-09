@@ -20,16 +20,16 @@ LEADS_CONFIRMED=0
 | Build | `npm run build` | PASS |
 | Firestore e Storage Rules | `npm run test:rules` — 11 testes, incluindo staff, membership ausente e cross-user | PASS |
 | Integração | `npm run test:integration` — 2 jornadas, incluindo Platform Owner e pedido/entrega | PASS |
-| QA manual no navegador | `npm run qa:screenshots` — customer, owner, driver, Platform Owner, bloqueio cross-tenant e troca de contexto Alpha/Beta | PASS; 21 screenshots reais |
+| QA no navegador | Jornada completa customer/owner/driver/Platform Owner; verificações direcionadas para negação cross-tenant do Driver e atualização de status pelo Owner | Jornada completa PASS com 21 capturas; verificações direcionadas PASS; 22 arquivos de screenshot catalogados |
 | Diagramas | `npm run docs:diagrams` — arquitetura e fluxo pedido/entrega | PASS; fontes Mermaid e SVGs |
 | Documentação | `npm run docs:check` — 14 arquivos Markdown, links e assets | PASS |
 | Leads | `npm run docs:leads` | PASS; zero leads confirmados |
 | Preços e limites | Baseline v05 e landing comparados | PASS, sem alteração |
 | Billing/deploy | Configuração local e fluxo do produto | NÃO EXECUTADOS; fora do escopo e sem aprovação |
 
-As suítes e a QA visual foram executadas nesta rodada. As 21 capturas estão catalogadas em [SCREENS.md](SCREENS.md), incluindo entrada do Platform Owner em Alpha, retorno à plataforma, troca para Beta, suspensão e reativação. Checkout, storefront mobile, os dois contextos do Platform Owner, entrega concluída e a negação entre tenants foram inspecionados visualmente. `docs/CURRENT.md` aponta para v06 e preserva v05 como fonte comercial.
+As suítes e a QA visual foram executadas nesta rodada. Uma jornada completa passou e salvou 21 capturas; verificações direcionadas também passaram para o bloqueio do Driver Alpha ao tentar abrir entregas Beta e para a atualização de status pelo Owner. Os 22 arquivos estão catalogados em [SCREENS.md](SCREENS.md). Checkout, storefront mobile, os dois contextos do Platform Owner, entrega concluída e as duas negações entre tenants foram inspecionados visualmente. Repetições posteriores da jornada completa tiveram timeouts intermitentes no tracking do navegador/emulador; por isso, elas não são contabilizadas como uma segunda execução completa aprovada. `docs/CURRENT.md` aponta para v06 e preserva v05 como fonte comercial.
 
-Avisos observados sem falha nos gates: o emulator executa Node 24 do host embora `functions/package.json` solicite Node 20, e a CLI sinaliza uma versão de `firebase-functions` desatualizada. O build passa; o Rollup remove comentários `@__PURE__` do Zod cuja posição não consegue interpretar. O seed local também emitiu `MetadataLookupWarning` de acesso à metadata externa, mas preparou com sucesso as 9 contas e os 2 tenants no Emulator Suite. Nenhuma implantação, Firebase de produção ou serviço pago foi acionado.
+Avisos observados sem falha nos gates: o emulator executa Node 24 do host embora `functions/package.json` solicite Node 20, e a CLI sinaliza uma versão de `firebase-functions` desatualizada. A descoberta das Functions usa 180 s e cada teste de integração 120 s para acomodar a inicialização lenta observada no host. O build passa; o Rollup remove comentários `@__PURE__` do Zod cuja posição não consegue interpretar. O seed local também emitiu `MetadataLookupWarning` de acesso à metadata externa, mas preparou com sucesso as 9 contas e os 2 tenants no Emulator Suite. Nenhuma implantação, Firebase de produção ou serviço pago foi acionado.
 
 ## Readiness A–H
 

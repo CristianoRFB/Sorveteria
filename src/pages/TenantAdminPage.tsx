@@ -250,7 +250,10 @@ function OrderManager({ tenantId, canResetDeliveryCode }: { tenantId: string; ca
     const reason = status === "cancelled" ? window.prompt("Motivo do cancelamento:")?.trim() : undefined;
     if (status === "cancelled" && !reason) return;
     setBusyId(order.id); setError(null);
-    try { await changeOrderStatus(tenantId, order.id, status, reason); }
+    try {
+      await changeOrderStatus(tenantId, order.id, status, reason);
+      setOrders((current) => current.map((row) => row.id === order.id ? { ...row, status } : row));
+    }
     catch (changeError) { setError(changeError instanceof Error ? changeError.message : "Não foi possível atualizar o pedido."); }
     finally { setBusyId(null); }
   }
@@ -259,7 +262,25 @@ function OrderManager({ tenantId, canResetDeliveryCode }: { tenantId: string; ca
     const driverId = selectedDrivers[order.id];
     if (!driverId) { setError("Escolha um entregador ativo."); return; }
     setBusyId(order.id); setError(null);
-    try { await assignDelivery(tenantId, order.id, driverId); }
+    try {
+      await assignDelivery(tenantId, order.id, driverId);
+      setOrders((current) => current.map((row) => row.id === order.id ? { ...row, status: "awaiting_driver" } : row));
+      setDeliveries((current) => {
+        const existing = current.find((delivery) => delivery.orderId === order.id);
+        const nextDelivery: DriverDelivery = {
+          id: order.id,
+          tenantId,
+          orderId: order.id,
+          driverId,
+          status: "assigned",
+          failedAttempts: existing?.failedAttempts ?? 0,
+          confirmationFailures: existing?.confirmationFailures ?? 0,
+        };
+        return existing
+          ? current.map((delivery) => delivery.orderId === order.id ? { ...delivery, ...nextDelivery } : delivery)
+          : [nextDelivery, ...current];
+      });
+    }
     catch (assignError) { setError(assignError instanceof Error ? assignError.message : "Não foi possível atribuir a entrega."); }
     finally { setBusyId(null); }
   }

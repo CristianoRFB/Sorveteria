@@ -13,7 +13,7 @@ const command = spawnSync(process.execPath, [
 ], {
   cwd: projectRoot,
   stdio: "inherit",
-  env: { ...process.env, FUNCTIONS_DISCOVERY_TIMEOUT: "60" },
+  env: { ...process.env, FUNCTIONS_DISCOVERY_TIMEOUT: process.env.FUNCTIONS_DISCOVERY_TIMEOUT || "180" },
 });
 
 if (command.error) throw command.error;

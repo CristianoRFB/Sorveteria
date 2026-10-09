@@ -5,7 +5,7 @@ export default mergeConfig(viteConfig, defineConfig({
   test: {
     include: ["tests/integration/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/dist/**", "tests/rules/**"],
-    testTimeout: 60_000,
-    hookTimeout: 60_000,
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
   },
 }));

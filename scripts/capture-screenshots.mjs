@@ -14,6 +14,7 @@ const password = "GelatoDev!2026";
 let browser;
 let ws;
 let send;
+let networkTrace = [];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitUntil(fn, label, timeout = 20000) {
@@ -30,9 +31,14 @@ async function waitForBrowser() {
   await waitUntil(async () => {
     try { const response = await fetch(`${cdp}/json/version`); return response.ok; } catch { return false; }
   }, "Edge CDP");
-  const response = await fetch(`${cdp}/json/new?${encodeURIComponent(`${baseUrl}/`)}`, { method: "PUT" });
-  if (!response.ok) throw new Error(`Não foi possível criar aba Edge: ${response.status}`);
-  return response.json();
+  return waitUntil(async () => {
+    try {
+      const response = await fetch(`${cdp}/json/list`);
+      if (!response.ok) return false;
+      const targets = await response.json();
+      return targets.find((target) => target.type === "page" && target.url.startsWith(baseUrl)) || false;
+    } catch { return false; }
+  }, "aba Edge inicial");
 }
 
 function connectDebugger(wsUrl) {
@@ -41,7 +47,16 @@ function connectDebugger(wsUrl) {
   const pending = new Map();
   ws.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
-    if (!message.id) return;
+    if (!message.id) {
+      if (message.method === "Network.requestWillBeSent" && String(message.params?.request?.url).includes(":5001/")) {
+        networkTrace.push({ event: "request", url: message.params.request.url, method: message.params.request.method });
+      } else if (message.method === "Network.responseReceived" && String(message.params?.response?.url).includes(":5001/")) {
+        networkTrace.push({ event: "response", url: message.params.response.url, status: message.params.response.status, headers: message.params.response.headers });
+      } else if (message.method === "Network.loadingFailed") {
+        networkTrace.push({ event: "failed", requestId: message.params?.requestId, error: message.params?.errorText, reason: message.params?.blockedReason, cors: message.params?.corsErrorStatus });
+      }
+      return;
+    }
     const waiter = pending.get(message.id);
     if (!waiter) return;
     pending.delete(message.id);
@@ -159,6 +174,8 @@ async function capture(name, mobile = false) {
 async function clearOrigin() {
   await send("Storage.clearDataForOrigin", { origin: baseUrl, storageTypes: "all" });
   await sleep(300);
+  await navigate(`/?qa-reset=${Date.now()}`);
+  await waitUntil(async () => await evaluate("(async () => { const request = indexedDB.open('firebaseLocalStorageDb'); const database = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); if (!database.objectStoreNames.contains('firebaseLocalStorage')) return true; const store = database.transaction('firebaseLocalStorage').objectStore('firebaseLocalStorage'); const query = store.getAll(); const rows = await new Promise((resolve, reject) => { query.onsuccess = () => resolve(query.result); query.onerror = () => reject(query.error); }); return rows.length === 0; })()"), "limpeza da sessão Auth", 15000);
 }
 
 try {
@@ -173,21 +190,51 @@ try {
   ({ ws, send } = connectDebugger(target.webSocketDebuggerUrl));
   await send("Page.enable");
   await send("Runtime.enable");
+  await send("Network.enable");
   await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
 
-  if (process.env.QA_DEBUG_DRIVER_ONLY === "1" || process.env.QA_DEBUG_OWNER_ONLY === "1") {
-    const isOwnerDebug = process.env.QA_DEBUG_OWNER_ONLY === "1";
+  if (process.env.QA_DEBUG_DRIVER_ONLY === "1" || process.env.QA_DEBUG_OWNER_ONLY === "1" || process.env.QA_DEBUG_OWNER_STATUS_ONLY === "1" || process.env.QA_DEBUG_DRIVER_BOUNDARY_ONLY === "1") {
+    const isOwnerStatusDebug = process.env.QA_DEBUG_OWNER_STATUS_ONLY === "1";
+    const isOwnerDebug = process.env.QA_DEBUG_OWNER_ONLY === "1" || isOwnerStatusDebug;
+    const isDriverBoundaryDebug = process.env.QA_DEBUG_DRIVER_BOUNDARY_ONLY === "1";
     await clearOrigin();
     await login(isOwnerDebug ? "owner.alpha@demo.sorveteria.test" : "driver.alpha@demo.sorveteria.test", isOwnerDebug ? "/tenant-alpha/painel" : "/tenant-alpha/painel/entregas");
     await sleep(2500);
+    if (isOwnerStatusDebug) {
+      const orderCode = process.env.QA_ORDER_CODE;
+      if (!orderCode) throw new Error("QA_ORDER_CODE é obrigatório no modo QA_DEBUG_OWNER_STATUS_ONLY.");
+      await waitText("Painel do negócio");
+      await waitText(orderCode, 30000);
+      for (const [buttonText, statusText] of [["Marcar: Confirmado", "Confirmado"], ["Marcar: Em preparo", "Em preparo"], ["Marcar: Pronto", "Pronto"]]) {
+        await clickOrderButton(orderCode, buttonText);
+        await waitUntil(async () => await evaluate(`(() => { const card = [...document.querySelectorAll('.order-card')].find((item) => item.innerText.includes(${JSON.stringify(orderCode)})); return Boolean(card && card.querySelector('.status-pill')?.innerText.trim() === ${JSON.stringify(statusText)}); })()`), statusText, 45000);
+      }
+      await setOrderSelect(orderCode, "select[aria-label=Entregador]", "driver-alpha");
+      await clickOrderButton(orderCode, "Atribuir entrega");
+      await waitUntil(async () => await evaluate(`(() => { const card = [...document.querySelectorAll('.order-card')].find((item) => item.innerText.includes(${JSON.stringify(orderCode)})); return Boolean(card && card.querySelector('.status-pill')?.innerText.trim() === "Aguardando entregador"); })()`), "Aguardando entregador", 45000);
+      await capture("tenant-owner-pedidos.png");
+      console.log(`QA Owner Alpha concluído para ${orderCode}: Confirmado → Em preparo → Pronto → Aguardando entregador.`);
+    } else if (isDriverBoundaryDebug) {
+      await waitText("Minhas entregas", 30000);
+      await navigate("/tenant-beta/painel/entregas");
+      await waitText("Seu acesso a esta sorveteria não está ativo.");
+      await capture("driver-alpha-sem-acesso-a-beta.png");
+      console.log("QA do Driver Alpha concluído: acesso a entregas Beta negado.");
+    } else {
     const body = await evaluate("JSON.stringify({ href: location.href, body: document.body?.innerText?.slice(0, 1600), buttons: [...document.querySelectorAll('button')].map((button) => button.innerText.trim()).filter(Boolean) })");
     const identity = await evaluate("(async () => { const request = indexedDB.open('firebaseLocalStorageDb'); const database = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); const storeName = [...database.objectStoreNames].find((name) => name === 'firebaseLocalStorage'); if (!storeName) return JSON.stringify({ stores: [...database.objectStoreNames] }); const store = database.transaction(storeName).objectStore(storeName); const rows = await new Promise((resolve, reject) => { const query = store.getAll(); query.onsuccess = () => resolve(query.result); query.onerror = () => reject(query.error); }); return JSON.stringify(rows.map((row) => ({ key: row.fbase_key, uid: row.value?.uid, email: row.value?.email }))); })()");
     console.log(`Estado ${isOwnerDebug ? "Owner" : "Driver"}: ${body}\nUsuário Auth local: ${identity}`);
+    }
   } else {
   await navigate("/");
   await capture("landing-saas.png");
   await navigate("/tenant-alpha/painel");
-  await waitUntil(async () => await evaluate("Boolean(document.querySelector('input[type=email]') && document.querySelector('input[type=password]'))"), "login de cliente");
+  try {
+    await waitUntil(async () => await evaluate("Boolean(document.querySelector('input[type=email]') && document.querySelector('input[type=password]'))"), "login de cliente", 45000);
+  } catch (error) {
+    const state = await evaluate("JSON.stringify({ href: location.href, body: document.body?.innerText?.slice(0, 1400) })").catch(() => "estado indisponível");
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nEstado ao abrir login de cliente: ${state}`);
+  }
   await capture("login-tenant.png");
   await setInput("input[type=email]", "customer.alpha@demo.sorveteria.test");
   await setInput("input[type=password]", password);
@@ -221,9 +268,10 @@ try {
   await capture("checkout.png");
   await evaluate("document.querySelector('form.checkout-layout')?.requestSubmit()");
   try {
-    await waitUntil(async () => await evaluate("Boolean(document.querySelector('.code-panel strong'))"), "confirmação do pedido", 60000);
+    await waitUntil(async () => await evaluate("Boolean(document.querySelector('.code-panel strong'))"), "confirmação do pedido", 120000);
   } catch (error) {
     console.error(`Estado do checkout após enviar: ${await evaluate("document.body?.innerText?.slice(-900) || ''")}`);
+    console.error(`Rede Functions: ${JSON.stringify(networkTrace.slice(-30))}`);
     throw error;
   }
   const publicCode = await evaluate("document.querySelector('.code-panel strong')?.textContent?.trim() || ''");
@@ -269,6 +317,9 @@ try {
   await clickButton("Confirmar entrega");
   await waitText("Entrega concluída.", 20000);
   await capture("driver-entrega-concluida.png");
+  await navigate("/tenant-beta/painel/entregas");
+  await waitText("Seu acesso a esta sorveteria não está ativo.");
+  await capture("driver-alpha-sem-acesso-a-beta.png");
 
   await clearOrigin();
   await login("owner.beta@demo.sorveteria.test", "/tenant-beta/painel");

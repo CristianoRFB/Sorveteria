@@ -21,6 +21,7 @@ As evidências abaixo são capturas reais da aplicação em execução local, us
 | Driver: entrega atribuída | [driver-entrega-atribuida.png](screenshots/driver-entrega-atribuida.png) |
 | Driver: chegada e código | [driver-chegada.png](screenshots/driver-chegada.png) |
 | Driver: entrega concluída | [driver-entrega-concluida.png](screenshots/driver-entrega-concluida.png) |
+| Driver Alpha tentando abrir entregas Beta | [driver-alpha-sem-acesso-a-beta.png](screenshots/driver-alpha-sem-acesso-a-beta.png) |
 | Platform Owner: tenants ativos | [platform-owner.png](screenshots/platform-owner.png) |
 | Platform Owner: contexto Alpha e retorno à plataforma | [platform-owner-contexto-alpha.png](screenshots/platform-owner-contexto-alpha.png) |
 | Platform Owner: contexto Beta e troca de contexto | [platform-owner-contexto-beta.png](screenshots/platform-owner-contexto-beta.png) |
@@ -30,6 +31,6 @@ As evidências abaixo são capturas reais da aplicação em execução local, us
 
 ## QA visual
 
-Em 08/10/2026, a jornada de navegador percorreu cliente → pedido → tracking; Owner Alpha → status e catálogo; Driver Alpha → saída, chegada e confirmação; Owner Beta → bloqueio ao painel Alpha; e Platform Owner → entrada em Alpha, retorno à plataforma, troca para Beta, suspensão e reativação no Emulator Suite. O script `npm run qa:screenshots` salvou as capturas acima após percorrer essas telas.
+Em 09/10/2026, a jornada completa no Emulator Suite percorreu cliente → pedido → tracking; Owner Alpha → status e catálogo; Driver Alpha → saída, chegada e confirmação; Owner Beta → bloqueio ao painel Alpha; e Platform Owner → entrada em Alpha, retorno à plataforma, troca para Beta, suspensão e reativação. Essa execução salvou 21 capturas. Em verificações direcionadas posteriores, a conta Driver Alpha tentou abrir as entregas Beta e recebeu a negação de acesso; o fluxo de status do Owner também foi revalidado após ajuste da atualização visual. Os arquivos resultantes totalizam 22 capturas catalogadas. Repetições posteriores da jornada completa tiveram timeout intermitente no tracking e não são contabilizadas como execuções completas aprovadas.
 
 As capturas foram inspecionadas visualmente; checkout, storefront mobile, Platform Owner e a negação entre tenants foram verificados em detalhe. Nenhuma imagem gerada foi usada como prova de funcionalidade.
