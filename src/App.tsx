@@ -5,6 +5,7 @@ import { CartProvider } from "@/context/CartContext";
 import { TenantProvider } from "@/context/TenantContext";
 import { TenantMembershipProvider } from "@/context/TenantMembershipContext";
 import { PlatformOwnerGuard, TenantMemberGuard } from "@/components/AccessGuards";
+import { CommercialStatusNotice } from "@/components/CommercialStatusNotice";
 import { useTenant } from "@/hooks/useTenant";
 
 const SaasLandingPage = lazy(() => import("@/pages/SaasLandingPage").then((module) => ({ default: module.SaasLandingPage })));
@@ -21,7 +22,7 @@ const DriverPage = lazy(() => import("@/pages/DriverPage").then((module) => ({ d
 function TenantScopedRoutes() {
   const { tenant } = useTenant();
   const { tenantSlug } = useParams();
-  return <div key={tenant?.id ?? tenantSlug ?? "tenant-unresolved"}><TenantMembershipProvider><CartProvider key={tenant?.id ?? "tenant-unresolved"}>
+  return <div key={tenant?.id ?? tenantSlug ?? "tenant-unresolved"}><CommercialStatusNotice /><TenantMembershipProvider><CartProvider key={tenant?.id ?? "tenant-unresolved"}>
     <Routes>
       <Route index element={<TenantStorefrontPage />} />
       <Route path="cardapio" element={<TenantMenuPage />} />

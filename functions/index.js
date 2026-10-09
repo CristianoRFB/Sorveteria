@@ -4,6 +4,7 @@ const { getAuth } = require("firebase-admin/auth");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeValid } = require("./domain/delivery.cjs");
+const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -45,6 +46,69 @@ async function requireTenantManager(transaction, tenantId, auth) {
   const membership = await readActiveMembership(transaction, tenantId, auth.uid);
   if (!["tenant_owner", "tenant_admin"].includes(membership.data.role)) fail("permission-denied", "Apenas o responsável ou administrador pode alterar esta configuração.");
   return membership;
+}
+
+function requireCommercialFeature(tenant, feature) {
+  const access = evaluateFeature(tenant, feature, { demoAllowed: process.env.FUNCTIONS_EMULATOR === "true" });
+  if (access.allowed) return;
+  const messages = {
+    "tenant-inactive": "Sorveteria indisponível para esta operação.",
+    "plan-unassigned": "A operação está bloqueada até o Platform Owner atribuir um plano.",
+    "trial-expired": "O período de avaliação terminou. Os dados estão preservados em modo de leitura.",
+    "subscription-suspended": "A assinatura está suspensa. Os dados estão preservados em modo de leitura.",
+    "subscription-cancelled": "A assinatura foi cancelada. Os dados estão preservados em modo de leitura.",
+    "demo-unavailable": "A demonstração só pode operar no ambiente local isolado.",
+    "invalid-trial": "O estado de avaliação precisa de revisão do Platform Owner.",
+    "plan-required": "Este recurso não está incluído no plano atribuído.",
+    "feature-not-implemented": "Este recurso ainda não está disponível nesta versão.",
+    "feature-disabled-for-tenant": "Este recurso está desabilitado para esta sorveteria.",
+  };
+  fail("failed-precondition", messages[access.reason] || "Recurso indisponível.");
+}
+
+function membershipCounts(memberships) {
+  let internalUsersActive = 0;
+  let driversActive = 0;
+  for (const membership of memberships) {
+    if (membership.status !== "active") continue;
+    if (ADMIN_ROLES.has(membership.role)) internalUsersActive += 1;
+    else if (membership.role === "driver") driversActive += 1;
+  }
+  return { internalUsersActive, driversActive };
+}
+
+async function updateMembershipCapacity(transaction, tenantId, tenant, previous, next) {
+  const counterRef = db.doc(`tenants/${tenantId}/commercialMeta/limitCounters`);
+  const counterSnapshot = await transaction.get(counterRef);
+  const counts = counterSnapshot.exists
+    ? { internalUsersActive: counterSnapshot.data().internalUsersActive, driversActive: counterSnapshot.data().driversActive }
+    : membershipCounts((await transaction.get(db.collection("memberships").where("tenantId", "==", tenantId))).docs.map((item) => item.data()));
+  const previousCounts = membershipCounts(previous ? [previous] : []);
+  const nextCounts = membershipCounts(next ? [next] : []);
+  const projected = {
+    internalUsersActive: counts.internalUsersActive - previousCounts.internalUsersActive + nextCounts.internalUsersActive,
+    driversActive: counts.driversActive - previousCounts.driversActive + nextCounts.driversActive,
+  };
+  const options = { demoAllowed: process.env.FUNCTIONS_EMULATOR === "true" };
+  const internalLimit = getLimit(tenant, "internalUsersActive", options);
+  const driverLimit = getLimit(tenant, "driversActive", options);
+  if (internalLimit === 0 || driverLimit === 0) requireCommercialFeature(tenant, "team_management");
+  if (internalLimit !== null && projected.internalUsersActive > internalLimit) fail("resource-exhausted", `Limite de usuários internos atingido (${internalLimit}).`);
+  if (driverLimit !== null && projected.driversActive > driverLimit) fail("resource-exhausted", `Limite de entregadores ativos atingido (${driverLimit}).`);
+  transaction.set(counterRef, { ...projected, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+}
+
+function validateCommercialOverrides(entitlementOverrides, limitOverrides) {
+  if (!hasOnlyKeys(entitlementOverrides, Object.keys(featureAvailability))) fail("invalid-argument", "Overrides de funcionalidades inválidos.");
+  for (const [key, value] of Object.entries(entitlementOverrides || {})) {
+    if (typeof value !== "boolean") fail("invalid-argument", `Override inválido para ${key}.`);
+  }
+  const limitNames = Object.keys(planCatalog.plans.essencial.limits);
+  if (!hasOnlyKeys(limitOverrides, limitNames)) fail("invalid-argument", "Overrides de limites inválidos.");
+  for (const [key, value] of Object.entries(limitOverrides || {})) {
+    if (value !== null && (!Number.isInteger(value) || value < 1 || value > 10000)) fail("invalid-argument", `Override inválido para o limite ${key}.`);
+    if (key === "establishments" && value !== null && value > 1) fail("failed-precondition", "O limite aprovado de estabelecimentos permanece em 1.");
+  }
 }
 
 function requireText(value, label, max = 160) {
@@ -208,6 +272,11 @@ exports.createTenant = onCall({ region: REGION }, async (request) => {
       borderRadius: "md",
     },
     features: { onlineMenu: true, pickup: true, delivery: true, qrCodes: true, tableOrdering: false, kds: false, cashRegister: false, finance: false, coupons: false, inventory: false },
+    planId: null,
+    subscriptionStatus: null,
+    entitlementOverrides: {},
+    limitOverrides: {},
+    commercialRevision: 0,
     contact: {},
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
@@ -236,6 +305,90 @@ exports.createTenant = onCall({ region: REGION }, async (request) => {
     }));
   });
   return { tenantId: tenantRef.id, slug, status: tenant.status, ownerFound: Boolean(owner) };
+});
+
+exports.assignTenantPlan = onCall({ region: REGION }, async (request) => {
+  const auth = requirePlatformOwner(request);
+  const tenantId = requireText(request.data?.tenantId, "Tenant", 128);
+  const planId = request.data?.planId;
+  const subscriptionStatus = request.data?.subscriptionStatus;
+  const reason = requireText(request.data?.reason, "Motivo", 500);
+  const allowedStatuses = ["trial", "active", "past_due", "suspended", "cancelled", "demo"];
+  if (!Object.hasOwn(planCatalog.plans, planId)) fail("invalid-argument", "Plano inválido.");
+  if (!allowedStatuses.includes(subscriptionStatus)) fail("invalid-argument", "Status comercial inválido.");
+  if (subscriptionStatus === "trial" && planId !== planCatalog.trial.planId) fail("failed-precondition", "O período de avaliação aprovado usa o plano Pro.");
+  if (subscriptionStatus === "demo" && (planId !== "premium" || process.env.FUNCTIONS_EMULATOR !== "true")) {
+    fail("failed-precondition", "A demonstração Premium só pode ser atribuída no Emulator Suite local.");
+  }
+  const entitlementOverrides = request.data?.entitlementOverrides;
+  const limitOverrides = request.data?.limitOverrides;
+  if (entitlementOverrides !== undefined || limitOverrides !== undefined) {
+    validateCommercialOverrides(entitlementOverrides ?? {}, limitOverrides ?? {});
+  }
+
+  const tenantRef = db.doc(`tenants/${tenantId}`);
+  let result;
+  await db.runTransaction(async (transaction) => {
+    const tenantSnapshot = await transaction.get(tenantRef);
+    if (!tenantSnapshot.exists) fail("not-found", "Sorveteria não encontrada.");
+    const tenant = tenantSnapshot.data();
+    const previous = {
+      planId: tenant.planId ?? null,
+      subscriptionStatus: tenant.subscriptionStatus ?? null,
+      trialUntil: tenant.trialUntil ?? null,
+      entitlementOverrides: tenant.entitlementOverrides ?? {},
+      limitOverrides: tenant.limitOverrides ?? {},
+    };
+    let trialUntil = tenant.trialUntil ?? null;
+    let trialGrantedAt = tenant.trialGrantedAt ?? null;
+    if (subscriptionStatus === "trial") {
+      if (tenant.subscriptionStatus === "trial" && tenant.trialUntil) {
+        trialUntil = tenant.trialUntil;
+      } else {
+        if (tenant.trialGrantedAt) fail("failed-precondition", "Este tenant já recebeu o período de avaliação aprovado.");
+        const now = new Date();
+        trialUntil = new Date(now.getTime() + planCatalog.trial.durationDays * 24 * 60 * 60 * 1000);
+        trialGrantedAt = FieldValue.serverTimestamp();
+      }
+    }
+    const next = {
+      planId,
+      subscriptionStatus,
+      trialUntil,
+      entitlementOverrides: entitlementOverrides === undefined ? previous.entitlementOverrides : entitlementOverrides,
+      limitOverrides: limitOverrides === undefined ? previous.limitOverrides : limitOverrides,
+    };
+    const unchanged = previous.planId === next.planId
+      && previous.subscriptionStatus === next.subscriptionStatus
+      && JSON.stringify(previous.entitlementOverrides) === JSON.stringify(next.entitlementOverrides)
+      && JSON.stringify(previous.limitOverrides) === JSON.stringify(next.limitOverrides)
+      && (subscriptionStatus !== "trial" || Boolean(tenant.trialUntil));
+    if (unchanged) {
+      result = { tenantId, ...next, unchanged: true };
+      return;
+    }
+    const revision = Number.isInteger(tenant.commercialRevision) ? tenant.commercialRevision + 1 : 1;
+    transaction.update(tenantRef, {
+      ...next,
+      ...(subscriptionStatus === "trial" ? { trialUntil, trialGrantedAt } : {}),
+      commercialRevision: revision,
+      commercialUpdatedAt: FieldValue.serverTimestamp(),
+      commercialAssignedBy: auth.uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.create(tenantRef.collection("auditLogs").doc(), auditRecord({
+      tenantId,
+      actorId: auth.uid,
+      actorRole: "platform_owner",
+      action: "tenant.plan_assigned",
+      entityType: "tenant_commercial_state",
+      entityId: tenantId,
+      reason,
+      metadata: { previous, next: { ...next, trialUntil: trialUntil || null }, revision },
+    }));
+    result = { tenantId, ...next, unchanged: false };
+  });
+  return result;
 });
 
 exports.setTenantStatus = onCall({ region: REGION }, async (request) => {
@@ -290,6 +443,7 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
     if (!tenantSnapshot.exists) fail("not-found", "Sorveteria não encontrada.");
     const membership = await requireTenantManager(transaction, tenantId, auth);
     if (tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa.");
+    requireCommercialFeature(tenantSnapshot.data(), "basic_admin");
     transaction.set(tenantRef.collection("settings").doc("main"), { ...settings, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     transaction.create(tenantRef.collection("auditLogs").doc(), auditRecord({
       tenantId, actorId: auth.uid, actorRole: membership?.data.role || "platform_owner", action: "tenant.updated", entityType: "tenant_settings", metadata: { changed: Object.keys(settings) },
@@ -313,6 +467,7 @@ exports.saveCatalogCategory = onCall({ region: REGION }, async (request) => {
     const previous = categoryId ? await transaction.get(categoryRef) : null;
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
     const membership = await requireTenantManager(transaction, tenantId, auth);
+    requireCommercialFeature(tenantSnapshot.data(), "catalog");
     if (categoryId && !previous.exists) fail("not-found", "Categoria não encontrada.");
     const value = { name, active, sortOrder, ...(previous?.exists ? {} : { createdAt: FieldValue.serverTimestamp() }), updatedAt: FieldValue.serverTimestamp() };
     if (previous?.exists) transaction.update(categoryRef, value);
@@ -339,6 +494,7 @@ exports.saveCatalogProduct = onCall({ region: REGION }, async (request) => {
     const previous = productId ? await transaction.get(productRef) : null;
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
     const membership = await requireTenantManager(transaction, tenantId, auth);
+    requireCommercialFeature(tenantSnapshot.data(), "catalog");
     if (!categorySnapshot.exists || categorySnapshot.data().active !== true) fail("failed-precondition", "Escolha uma categoria ativa.");
     if (productId && !previous.exists) fail("not-found", "Produto não encontrado.");
     const value = { ...product, ...(previous?.exists ? {} : { createdAt: FieldValue.serverTimestamp() }), updatedAt: FieldValue.serverTimestamp() };
@@ -372,6 +528,7 @@ exports.addTenantMember = onCall({ region: REGION }, async (request) => {
     const previous = await transaction.get(memberRef);
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
     const manager = await requireTenantManager(transaction, tenantId, auth);
+    requireCommercialFeature(tenantSnapshot.data(), "team_management");
     if (role === "tenant_admin" && manager?.data.role !== "tenant_owner" && auth.token.platform_owner !== true) {
       fail("permission-denied", "Somente o responsável pode atribuir perfil de administrador.");
     }
@@ -381,6 +538,7 @@ exports.addTenantMember = onCall({ region: REGION }, async (request) => {
       role, status: "active", createdAt: previous.exists ? previous.data().createdAt : FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     };
+    await updateMembershipCapacity(transaction, tenantId, tenantSnapshot.data(), previous.exists ? previous.data() : null, membership);
     if (previous.exists) transaction.update(memberRef, membership);
     else transaction.create(memberRef, membership);
     transaction.create(tenantRef.collection("auditLogs").doc(), auditRecord({
@@ -407,6 +565,8 @@ exports.setTenantMemberStatus = onCall({ region: REGION }, async (request) => {
     const manager = await requireTenantManager(transaction, tenantId, auth);
     if (!memberSnapshot.exists) fail("not-found", "Membro não encontrado.");
     if (memberSnapshot.data().role === "tenant_owner") fail("failed-precondition", "A conta responsável não pode ser desativada por esta ação.");
+    requireCommercialFeature(tenantSnapshot.data(), "team_management");
+    await updateMembershipCapacity(transaction, tenantId, tenantSnapshot.data(), memberSnapshot.data(), { ...memberSnapshot.data(), status });
     transaction.update(memberRef, { status, updatedAt: FieldValue.serverTimestamp() });
     transaction.create(tenantRef.collection("auditLogs").doc(), auditRecord({
       tenantId, actorId: auth.uid, actorRole: manager?.data.role || "platform_owner", action: "role.changed",
@@ -448,11 +608,14 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria indisponível para novos pedidos.");
     if (trackingSnapshot.exists) fail("aborted", "Gere o pedido novamente.");
     const tenant = tenantSnapshot.data();
+    requireCommercialFeature(tenant, "online_menu");
+    requireCommercialFeature(tenant, "checkout");
+    requireCommercialFeature(tenant, "web_orders");
     const settings = settingsSnapshot.exists ? settingsSnapshot.data() : { deliveryFeeCents: 0, estimatedMinutes: 30, paymentMethods: [] };
     const paymentMethod = settings.paymentMethods?.find((method) => method.id === paymentMethodId && method.enabled === true);
     if (!paymentMethod) fail("failed-precondition", "Forma de pagamento indisponível.");
-    if (fulfillmentMode === "delivery" && tenant.features?.delivery !== true) fail("failed-precondition", "Entrega indisponível nesta sorveteria.");
-    if (fulfillmentMode === "pickup" && tenant.features?.pickup !== true) fail("failed-precondition", "Retirada indisponível nesta sorveteria.");
+    if (fulfillmentMode === "delivery") requireCommercialFeature(tenant, "simple_delivery");
+    if (fulfillmentMode === "pickup") requireCommercialFeature(tenant, "pickup");
 
     const lineItems = [];
     let subtotalCents = 0;
@@ -535,6 +698,7 @@ exports.updateOrderStatus = onCall({ region: REGION }, async (request) => {
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
     if (!orderSnapshot.exists) fail("not-found", "Pedido não encontrado.");
     const membership = await requireTenantAdmin(transaction, tenantId, auth);
+    requireCommercialFeature(tenantSnapshot.data(), "order_management");
     const order = orderSnapshot.data();
     if (!canTransition(order.status, nextStatus, order.fulfillmentMode)) fail("failed-precondition", "Transição de pedido inválida.");
     if (nextStatus === "cancelled" && reason.length < 3) fail("invalid-argument", "Informe o motivo do cancelamento.");
@@ -578,6 +742,7 @@ exports.assignDelivery = onCall({ region: REGION }, async (request) => {
     const privateCodeSnapshot = await transaction.get(privateCodeRef);
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
     const manager = await requireTenantAdmin(transaction, tenantId, auth);
+    requireCommercialFeature(tenantSnapshot.data(), "simple_delivery");
     if (!orderSnapshot.exists) fail("not-found", "Pedido não encontrado.");
     const order = orderSnapshot.data();
     const isReassignment = order.status === "out_for_delivery" && deliverySnapshot.exists && deliverySnapshot.data().status === "failed";
@@ -627,6 +792,8 @@ exports.driverDeliveryAction = onCall({ region: REGION }, async (request) => {
     const membershipSnapshot = await transaction.get(membershipRef);
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
     if (!membershipSnapshot.exists || membershipSnapshot.data().role !== "driver" || membershipSnapshot.data().status !== "active") fail("permission-denied", "Entregador sem vínculo ativo.");
+    requireCommercialFeature(tenantSnapshot.data(), "simple_delivery");
+    if (action === "deliver") requireCommercialFeature(tenantSnapshot.data(), "delivery_confirmation");
     if (!deliverySnapshot.exists || !orderSnapshot.exists) fail("not-found", "Entrega não encontrada.");
     const delivery = deliverySnapshot.data();
     const order = orderSnapshot.data();
@@ -695,6 +862,8 @@ exports.resetDeliveryConfirmationCode = onCall({ region: REGION }, async (reques
       if (membership.data.role !== "tenant_owner") fail("permission-denied", "Somente o responsável ou Platform Owner pode redefinir o código.");
     }
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
+    requireCommercialFeature(tenantSnapshot.data(), "simple_delivery");
+    requireCommercialFeature(tenantSnapshot.data(), "delivery_confirmation");
     if (!orderSnapshot.exists || !deliverySnapshot.exists) fail("not-found", "Entrega não encontrada.");
     const order = orderSnapshot.data();
     const delivery = deliverySnapshot.data();

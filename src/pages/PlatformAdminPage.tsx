@@ -2,7 +2,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
-import { platformCreateTenant, platformEnterTenant, platformSetTenantStatus, type TenantSummary } from "@/services/tenantOperations";
+import { platformAssignTenantPlan, platformCreateTenant, platformEnterTenant, platformSetTenantStatus, type TenantSummary } from "@/services/tenantOperations";
+import type { TenantPlanId, TenantSubscriptionStatus } from "@/domain/tenant";
+import { sorveteriaPlanCatalog } from "@/domain/entitlements";
+import { usingFirebaseEmulators } from "@/lib/firebase";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -16,6 +19,7 @@ export function PlatformAdminPage() {
   const [ownerEmail, setOwnerEmail] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [commercialSelections, setCommercialSelections] = useState<Record<string, { planId: TenantPlanId; status: TenantSubscriptionStatus }>>({});
 
   useEffect(() => onSnapshot(query(collection(db, "tenants"), orderBy("slug")), (snapshot) => {
     setTenants(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as TenantSummary));
@@ -61,6 +65,43 @@ export function PlatformAdminPage() {
     } finally { setPending(false); }
   }
 
+  function selectedCommercialState(tenant: TenantSummary) {
+    return commercialSelections[tenant.id] || {
+      planId: tenant.subscriptionStatus === "trial" ? "pro" : tenant.planId || "essencial",
+      status: tenant.subscriptionStatus || "active",
+    };
+  }
+
+  function selectCommercialPlan(tenant: TenantSummary, planId: TenantPlanId) {
+    const current = selectedCommercialState(tenant);
+    setCommercialSelections((selection) => ({
+      ...selection,
+      [tenant.id]: { planId, status: current.status === "trial" && planId !== "pro" ? "active" : current.status },
+    }));
+  }
+
+  function selectCommercialStatus(tenant: TenantSummary, status: TenantSubscriptionStatus) {
+    const current = selectedCommercialState(tenant);
+    setCommercialSelections((selection) => ({
+      ...selection,
+      [tenant.id]: { planId: status === "trial" ? "pro" : status === "demo" ? "premium" : current.planId, status },
+    }));
+  }
+
+  async function assignPlan(event: FormEvent<HTMLFormElement>, tenant: TenantSummary) {
+    event.preventDefault();
+    const selection = selectedCommercialState(tenant);
+    const reason = window.prompt("Motivo obrigatório para a atribuição comercial:")?.trim();
+    if (!reason) return;
+    setPending(true); setError(null); setMessage(null);
+    try {
+      await platformAssignTenantPlan({ tenantId: tenant.id, planId: selection.planId, subscriptionStatus: selection.status, reason });
+      setMessage(`${tenant.branding.displayName}: ${sorveteriaPlanCatalog.plans[selection.planId].name} · ${selection.status}.`);
+    } catch (assignError) {
+      setError(assignError instanceof Error ? assignError.message : "Não foi possível atribuir o plano.");
+    } finally { setPending(false); }
+  }
+
   async function enter(tenant: TenantSummary) {
     setPending(true); setError(null);
     try {
@@ -86,12 +127,23 @@ export function PlatformAdminPage() {
             {tenants.map((tenant) => (
               <article className="tenant-row" key={tenant.id}>
                 <div className="tenant-row-main"><strong>{tenant.branding.displayName}</strong><span>/{tenant.slug}</span><span className={`status-pill status-${tenant.status}`}>{tenant.status}</span></div>
+                <p className="muted">Plano: {tenant.planId ? sorveteriaPlanCatalog.plans[tenant.planId].name : "não atribuído"} · assinatura: {tenant.subscriptionStatus || "não atribuída"}{tenant.subscriptionStatus === "trial" && tenant.trialUntil && <span> · avaliação até {new Intl.DateTimeFormat("pt-BR").format(tenant.trialUntil instanceof Date ? tenant.trialUntil : tenant.trialUntil.toDate?.() || new Date(tenant.trialUntil as unknown as string))}</span>}</p>
                 <div className="actions compact-actions">
                   {tenant.status === "active" && <button className="button secondary" disabled={pending} onClick={() => void enter(tenant)}>Entrar no contexto</button>}
                   {tenant.status === "active"
                     ? <button className="button danger-button" disabled={pending} onClick={() => void setStatus(tenant, "suspended")}>Suspender</button>
                     : <button className="button secondary" disabled={pending} onClick={() => void setStatus(tenant, "active")}>Ativar</button>}
                 </div>
+                <form className="commercial-assignment-form" onSubmit={(event) => void assignPlan(event, tenant)}>
+                  <label>Plano<select value={selectedCommercialState(tenant).planId} onChange={(event) => selectCommercialPlan(tenant, event.target.value as TenantPlanId)}>
+                    {Object.entries(sorveteriaPlanCatalog.plans).map(([id, plan]) => <option key={id} value={id}>{plan.name}</option>)}
+                  </select></label>
+                  <label>Status da assinatura<select value={selectedCommercialState(tenant).status} onChange={(event) => selectCommercialStatus(tenant, event.target.value as TenantSubscriptionStatus)}>
+                    {(["active", "trial", "past_due", "suspended", "cancelled"] as TenantSubscriptionStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}
+                    {usingFirebaseEmulators && <option value="demo">demo local</option>}
+                  </select></label>
+                  <button className="button secondary" type="submit" disabled={pending}>{pending ? "Salvando..." : "Atribuir plano"}</button>
+                </form>
               </article>
             ))}
           </div>

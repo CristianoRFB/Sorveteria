@@ -4,6 +4,7 @@ import { useCart } from "@/hooks/useCart";
 import { cartSubtotal } from "@/domain/cart";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
+import { canUseTenantFeature, featureAccessMessage } from "@/domain/entitlements";
 
 function money(cents: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
@@ -12,6 +13,7 @@ function money(cents: number) {
 export function CartPage() {
   const { tenant, loading, error } = useTenant();
   const { items, setQuantity, removeItem } = useCart();
+  const canCheckout = canUseTenantFeature(tenant, "checkout") && canUseTenantFeature(tenant, "web_orders");
   if (loading) return <LoadingState label="Carregando carrinho..." />;
   if (error || !tenant) return <ErrorState message={error ?? "Sorveteria indisponível."} />;
   const subtotal = cartSubtotal(items);
@@ -25,7 +27,7 @@ export function CartPage() {
         <strong className="line-total">{money(item.unitPriceCents * item.quantity)}</strong>
         <button className="text-button danger-text remove-line" onClick={() => removeItem(item.lineId)}>Remover</button>
       </article>)}</div>
-      <section className="cart-summary"><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div><p className="muted">A taxa de entrega, quando aplicável, será exibida no checkout.</p><Link className="button primary full-width" to={`/${tenant.slug}/checkout`}>Continuar para checkout</Link></section>
+      <section className="cart-summary"><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div><p className="muted">A taxa de entrega, quando aplicável, será exibida no checkout.</p>{canCheckout ? <Link className="button primary full-width" to={`/${tenant.slug}/checkout`}>Continuar para checkout</Link> : <><p className="notice" role="status">{featureAccessMessage(tenant, "checkout")}</p><button className="button primary full-width" type="button" disabled>Checkout indisponível</button></>}</section>
     </>}
   </main>;
 }

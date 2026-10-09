@@ -3,9 +3,11 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 
 const expectedProjectId = "demo-sorveteria";
+const authEmulatorHost = process.env.SORVETERIA_AUTH_EMULATOR_HOST || "127.0.0.1:9099";
+const firestoreEmulatorHost = process.env.SORVETERIA_FIRESTORE_EMULATOR_HOST || "127.0.0.1:8088";
 if (process.env.GCLOUD_PROJECT !== expectedProjectId
-  || !/^127\.0\.0\.1:9099$/.test(process.env.FIREBASE_AUTH_EMULATOR_HOST || "")
-  || !/^127\.0\.0\.1:8088$/.test(process.env.FIRESTORE_EMULATOR_HOST || "")) {
+  || process.env.FIREBASE_AUTH_EMULATOR_HOST !== authEmulatorHost
+  || process.env.FIRESTORE_EMULATOR_HOST !== firestoreEmulatorHost) {
   throw new Error("Seed recusado: execute dentro dos emuladores do projeto demo-sorveteria.");
 }
 
@@ -81,6 +83,8 @@ for (const [tenantId, slug, name] of [["tenant-alpha", "tenant-alpha", "Sorveter
     branding: { displayName: name, primaryColor: "#6d28d9", secondaryColor: "#f1e9ff", backgroundColor: "#fffaf3", textColor: "#201a2a", borderRadius: "md" },
     contact: { phone: "+55 11 4000-0000", address: "Rua de demonstração, 100" },
     features: { onlineMenu: true, pickup: true, delivery: true, qrCodes: true, tableOrdering: false, kds: false, cashRegister: false, finance: false, coupons: false, inventory: false },
+    planId: "essencial", subscriptionStatus: "active", entitlementOverrides: {}, limitOverrides: {}, commercialRevision: 1,
+    commercialUpdatedAt: Timestamp.now(), commercialAssignedBy: "local-emulator-fixture",
     createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
   }, { merge: true });
   await db.doc(`tenantSlugs/${slug}`).set({ tenantId, createdAt: Timestamp.now() });
@@ -105,4 +109,3 @@ for (const [uid, tenantId, role] of memberships) {
 
 await deleteApp(app);
 console.log(`Emulator preparado: ${accounts.length} contas, 2 sorveterias e ${productTemplates.length} produtos em cada cardápio.`);
-console.log(`Senha local de demonstração: ${password}`);

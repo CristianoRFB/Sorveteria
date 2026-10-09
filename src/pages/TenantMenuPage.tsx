@@ -5,6 +5,7 @@ import { selectedProductPrice, validateProductSelection } from "@/domain/catalog
 import { useCart } from "@/hooks/useCart";
 import { useTenant } from "@/hooks/useTenant";
 import { listPublicCatalog } from "@/services/catalogService";
+import { canUseTenantFeature, featureAccessMessage } from "@/domain/entitlements";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -41,6 +42,7 @@ export function TenantMenuPage() {
   const visibleProducts = useMemo(() => activeCategory === "all"
     ? products
     : products.filter((product) => product.categoryId === activeCategory), [activeCategory, products]);
+  const canOrder = canUseTenantFeature(tenant, "cart") && canUseTenantFeature(tenant, "checkout");
 
   if (tenantLoading) return <LoadingState label="Abrindo cardápio..." />;
   if (tenantError || !tenant) return <ErrorState message={tenantError ?? "Cardápio indisponível."} />;
@@ -48,6 +50,7 @@ export function TenantMenuPage() {
   if (!tenant.features.onlineMenu) return <ErrorState message="O cardápio online está temporariamente indisponível." />;
 
   function openProduct(product: CatalogProduct) {
+    if (!canOrder) return;
     setSelectedProduct(product);
     setSelections({});
     setSelectionError(null);
@@ -76,11 +79,12 @@ export function TenantMenuPage() {
   return <main className="content menu-content">
     <header className="menu-heading"><div><span className="eyebrow">{tenant.branding.displayName}</span><h1>Cardápio</h1><p className="muted">Escolha o produto e personalize do seu jeito.</p></div><Link className="button secondary cart-button" to={`/${tenant.slug}/carrinho`}>Carrinho <span>{items.reduce((total, item) => total + item.quantity, 0)}</span></Link></header>
     {notice && <p className="notice" role="status">{notice}</p>}
+    {!canOrder && <p className="notice" role="status">{featureAccessMessage(tenant, "checkout")}</p>}
     {error && <ErrorState message={error} />}
     {categories.length > 0 && <nav className="category-chips" aria-label="Categorias"><button className={activeCategory === "all" ? "selected" : ""} onClick={() => setActiveCategory("all")}>Tudo</button>{categories.map((category) => <button className={activeCategory === category.id ? "selected" : ""} key={category.id} onClick={() => setActiveCategory(category.id)}>{category.name}</button>)}</nav>}
     {products.length === 0 ? <section className="empty-state"><h2>Cardápio em preparo</h2><p>A loja ainda não publicou produtos. Volte mais tarde.</p></section> : visibleProducts.length === 0 ? <div className="empty-state">Nenhum produto disponível nesta categoria.</div> : <section className="menu-product-grid" aria-label="Produtos">{visibleProducts.map((product) => <article className="menu-product-card" key={product.id}>
       <div className={`product-art product-art-${product.kind}`} aria-hidden="true"><span>{product.kind === "cone" ? "◒" : product.kind === "milkshake" ? "◒" : "◉"}</span></div>
-      <div className="menu-product-details"><span className="category-label">{categories.find((category) => category.id === product.categoryId)?.name}</span><h2>{product.name}</h2><p>{product.description || "Preparado na hora com os sabores da casa."}</p><div className="product-card-footer"><strong>{money(product.priceCents)}</strong><button className="button primary" onClick={() => openProduct(product)}>{product.optionGroups.length ? "Personalizar" : "Adicionar"}</button></div></div>
+      <div className="menu-product-details"><span className="category-label">{categories.find((category) => category.id === product.categoryId)?.name}</span><h2>{product.name}</h2><p>{product.description || "Preparado na hora com os sabores da casa."}</p><div className="product-card-footer"><strong>{money(product.priceCents)}</strong><button className="button primary" disabled={!canOrder} onClick={() => openProduct(product)}>{product.optionGroups.length ? "Personalizar" : "Adicionar"}</button></div></div>
     </article>)}</section>}
     {selectedProduct && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedProduct(null); }}>
       <section className="product-modal" role="dialog" aria-modal="true" aria-labelledby="customize-title">
@@ -94,7 +98,7 @@ export function TenantMenuPage() {
           })}
         </fieldset>)}
         {selectionError && <p className="error-text" role="alert">{selectionError}</p>}
-        <button className="button primary full-width" onClick={addSelectedProduct}>Adicionar ao carrinho · {money(selectedProductPrice(selectedProduct, selections))}</button>
+        <button className="button primary full-width" disabled={!canOrder} onClick={addSelectedProduct}>Adicionar ao carrinho · {money(selectedProductPrice(selectedProduct, selections))}</button>
       </section>
     </div>}
   </main>;

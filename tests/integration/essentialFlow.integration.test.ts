@@ -32,9 +32,11 @@ beforeAll(() => {
   auth = getAuth(app);
   db = getFirestore(app);
   functions = getFunctions(app, "southamerica-east1");
-  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
-  connectFirestoreEmulator(db, "127.0.0.1", 8088);
-  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+  connectAuthEmulator(auth, `http://${process.env.SORVETERIA_AUTH_EMULATOR_HOST || "127.0.0.1:9099"}`, { disableWarnings: true });
+  const [firestoreHost, firestorePort] = (process.env.SORVETERIA_FIRESTORE_EMULATOR_HOST || "127.0.0.1:8088").split(":");
+  const [functionsHost, functionsPort] = (process.env.SORVETERIA_FUNCTIONS_EMULATOR_HOST || "127.0.0.1:5001").split(":");
+  connectFirestoreEmulator(db, firestoreHost, Number(firestorePort));
+  connectFunctionsEmulator(functions, functionsHost, Number(functionsPort));
 });
 
 afterAll(async () => {
@@ -63,6 +65,28 @@ describe("fluxo essencial em dois tenants", () => {
 
     const setStatus = callable<{ tenantId: string; status: "active" | "suspended"; reason: string }, { tenantId: string; status: string }>("setTenantStatus");
     await setStatus({ tenantId: created.data.tenantId, status: "active", reason: "Responsável validado para homologação" });
+    const updateSettings = callable<{ tenantId: string; settings: { deliveryFeeCents: number; estimatedMinutes: number; paymentMethods: { id: string; label: string; enabled: boolean }[] } }, { success: boolean }>("updateTenantSettings");
+    await expect(updateSettings({
+      tenantId: created.data.tenantId,
+      settings: { deliveryFeeCents: 0, estimatedMinutes: 30, paymentMethods: [{ id: "cash", label: "Dinheiro", enabled: true }] },
+    })).rejects.toMatchObject({ code: "functions/failed-precondition" });
+    const assignPlan = callable<{
+      tenantId: string; planId: string; subscriptionStatus: string; reason: string;
+    }, { unchanged: boolean }>("assignTenantPlan");
+    await expect(assignPlan({ tenantId: created.data.tenantId, planId: "pro", subscriptionStatus: "trial", reason: "Tentativa sem autorização" }))
+      .rejects.toMatchObject({ code: "functions/permission-denied" });
+    await signIn("platform@demo.sorveteria.test");
+    const trial = await assignPlan({ tenantId: created.data.tenantId, planId: "pro", subscriptionStatus: "trial", reason: "Avaliação comercial aprovada" });
+    expect(trial.data.unchanged).toBe(false);
+    const assignedTenant = await getDoc(doc(db, "tenants", created.data.tenantId));
+    expect(assignedTenant.data()).toMatchObject({ planId: "pro", subscriptionStatus: "trial", commercialRevision: 1 });
+    const trialUntil = assignedTenant.data()?.trialUntil.toDate().getTime() as number;
+    expect(trialUntil).toBeGreaterThan(Date.now() + 13 * 24 * 60 * 60 * 1000);
+    expect(trialUntil).toBeLessThanOrEqual(Date.now() + 14 * 24 * 60 * 60 * 1000 + 1000);
+    expect((await assignPlan({ tenantId: created.data.tenantId, planId: "pro", subscriptionStatus: "trial", reason: "Repetição idempotente" })).data.unchanged).toBe(true);
+    await assignPlan({ tenantId: created.data.tenantId, planId: "pro", subscriptionStatus: "active", reason: "Fim de cenário de avaliação" });
+    await expect(assignPlan({ tenantId: created.data.tenantId, planId: "pro", subscriptionStatus: "trial", reason: "Não deve renovar trial" }))
+      .rejects.toMatchObject({ code: "functions/failed-precondition" });
     const entered = await callable<{ tenantId: string }, { tenantId: string; slug: string }>("enterTenantContext")({ tenantId: created.data.tenantId });
     expect(entered.data.slug).toBe("tenant-readiness");
     expect((await publicLookup()).docs).toHaveLength(1);
@@ -71,12 +95,25 @@ describe("fluxo essencial em dois tenants", () => {
     expect((await publicLookup()).empty).toBe(true);
     const audit = await getDocs(collection(db, `tenants/${created.data.tenantId}/auditLogs`));
     expect(audit.docs.map((entry) => entry.data().action)).toEqual(expect.arrayContaining([
-      "tenant.created", "tenant.reactivated", "tenant.context_entered", "tenant.suspended",
+      "tenant.created", "tenant.reactivated", "tenant.plan_assigned", "tenant.context_entered", "tenant.suspended",
     ]));
+    const planAudit = audit.docs.find((entry) => entry.data().action === "tenant.plan_assigned");
+    expect(planAudit?.data()).toMatchObject({ reason: "Avaliação comercial aprovada", metadata: { previous: { planId: null, subscriptionStatus: null }, next: { planId: "pro", subscriptionStatus: "trial" } } });
 
     await signIn("owner.alpha@demo.sorveteria.test");
     await expect(setStatus({ tenantId: created.data.tenantId, status: "active", reason: "Tentativa sem autorização" }))
       .rejects.toMatchObject({ code: "functions/permission-denied" });
+  });
+
+  it("aplica limites Essential de equipe e entregadores no backend", async () => {
+    await signIn("owner.alpha@demo.sorveteria.test");
+    const addMember = callable<{ tenantId: string; email: string; role: string }, { userId: string }>("addTenantMember");
+    await expect(addMember({ tenantId: "tenant-alpha", email: "staff.beta@demo.sorveteria.test", role: "staff" }))
+      .rejects.toMatchObject({ code: "functions/resource-exhausted" });
+    await expect(addMember({ tenantId: "tenant-alpha", email: "driver.beta@demo.sorveteria.test", role: "driver" }))
+      .rejects.toMatchObject({ code: "functions/resource-exhausted" });
+    const counter = await getDoc(doc(db, "tenants/tenant-alpha/commercialMeta/limitCounters"));
+    expect(counter.exists()).toBe(false);
   });
 
   it("resolve tenant, recalcula pedido no servidor e fecha entrega com código single-use", async () => {

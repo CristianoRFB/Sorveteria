@@ -12,6 +12,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import type { Order } from "@/domain/order";
 import type { Membership } from "@/domain/membership";
+import type { TenantPlanId, TenantSubscriptionStatus } from "@/domain/tenant";
 import { db, functions } from "@/lib/firebase";
 
 export type TenantSummary = {
@@ -19,6 +20,9 @@ export type TenantSummary = {
   slug: string;
   status: string;
   branding: { displayName: string };
+  planId?: TenantPlanId | null;
+  subscriptionStatus?: TenantSubscriptionStatus | null;
+  trialUntil?: { toDate?: () => Date } | Date | null;
 };
 
 export type DriverDelivery = {
@@ -80,6 +84,16 @@ export async function platformCreateTenant(input: { displayName: string; slug: s
 
 export async function platformSetTenantStatus(input: { tenantId: string; status: "active" | "suspended"; reason: string }) {
   const call = httpsCallable(functions, "setTenantStatus");
+  await call(input);
+}
+
+export async function platformAssignTenantPlan(input: {
+  tenantId: string;
+  planId: TenantPlanId;
+  subscriptionStatus: TenantSubscriptionStatus;
+  reason: string;
+}) {
+  const call = httpsCallable(functions, "assignTenantPlan");
   await call(input);
 }
 
