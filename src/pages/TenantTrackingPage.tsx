@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTenant } from "@/hooks/useTenant";
 import { findPublicTracking } from "@/services/orderService";
 import type { PublicTracking } from "@/domain/tracking";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
+import { createTrackingRequestGate } from "@/domain/trackingRequestGate";
 
 const labels: Record<string, string> = {
   received: "Pedido recebido", confirmed: "Pedido confirmado", preparing: "Em preparo", ready: "Pedido pronto",
@@ -15,23 +16,56 @@ const labels: Record<string, string> = {
 export function TenantTrackingPage() {
   const { tenant, loading: tenantLoading, error: tenantError } = useTenant();
   const [params] = useSearchParams();
-  const [code, setCode] = useState(() => params.get("code") || "");
+  const urlCode = (params.get("code") || "").trim().toUpperCase();
+  const [code, setCode] = useState(urlCode);
+  const requestGate = useRef(createTrackingRequestGate());
+  const tenantId = tenant?.id;
   const [tracking, setTracking] = useState<PublicTracking | null>(null);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Load deep links automatically, discard stale responses on tenant/code changes.
+  useEffect(() => {
+    const gate = requestGate.current;
+    const token = gate.begin();
+    setCode(urlCode);
+    setTracking(null);
+    setError(null);
+    setSearched(false);
+    setLoading(false);
+    if (!tenantId || !urlCode) return () => { gate.invalidate(); };
+    setLoading(true);
+    setSearched(true);
+    void findPublicTracking(tenantId, urlCode).then((result) => {
+      if (!gate.isCurrent(token)) return;
+      setTracking(result);
+      if (!result) setError("Não encontramos esse pedido nesta sorveteria. Confira o código e tente novamente.");
+    }).catch((lookupError: unknown) => {
+      if (!gate.isCurrent(token)) return;
+      setError(lookupError instanceof Error ? lookupError.message : "Não foi possível consultar o pedido agora.");
+    }).finally(() => {
+      if (gate.isCurrent(token)) setLoading(false);
+    });
+    return () => { gate.invalidate(); };
+  }, [tenantId, urlCode]);
+
   async function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!tenant) return;
+    const token = requestGate.current.begin();
     setLoading(true); setError(null); setSearched(true); setTracking(null);
     try {
       const result = await findPublicTracking(tenant.id, code);
+      if (!requestGate.current.isCurrent(token)) return;
       setTracking(result);
       if (!result) setError("Não encontramos esse pedido nesta sorveteria. Confira o código e tente novamente.");
     } catch (lookupError) {
+      if (!requestGate.current.isCurrent(token)) return;
       setError(lookupError instanceof Error ? lookupError.message : "Não foi possível consultar o pedido agora.");
-    } finally { setLoading(false); }
+    } finally {
+      if (requestGate.current.isCurrent(token)) setLoading(false);
+    }
   }
 
   if (tenantLoading) return <LoadingState label="Carregando loja..." />;
