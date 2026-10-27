@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { deleteApp, initializeApp, type FirebaseApp } from "firebase/app";
+import { initializeApp as initializeAdminApp, deleteApp as deleteAdminApp, type App as AdminApp } from "firebase-admin/app";
+import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut, type Auth } from "firebase/auth";
 import { connectFirestoreEmulator, doc, getDoc, getDocs, getFirestore, query, where, collection, type Firestore } from "firebase/firestore";
 import { connectFunctionsEmulator, getFunctions, httpsCallable, type Functions } from "firebase/functions";
@@ -10,6 +12,7 @@ let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 let functions: Functions;
+let adminApp: AdminApp;
 
 async function signIn(email: string) {
   if (auth.currentUser) await signOut(auth);
@@ -21,6 +24,7 @@ function callable<Input, Output>(name: string) {
 }
 
 beforeAll(() => {
+  adminApp = initializeAdminApp({ projectId }, "essential-flow-admin");
   app = initializeApp({
     apiKey: "demo-api-key",
     authDomain: "localhost",
@@ -42,6 +46,7 @@ beforeAll(() => {
 afterAll(async () => {
   if (auth?.currentUser) await signOut(auth);
   if (app) await deleteApp(app);
+  if (adminApp) await deleteAdminApp(adminApp);
 });
 
 describe("fluxo essencial em dois tenants", () => {
@@ -73,6 +78,7 @@ describe("fluxo essencial em dois tenants", () => {
     const assignPlan = callable<{
       tenantId: string; planId: string; subscriptionStatus: string; reason: string;
     }, { unchanged: boolean }>("assignTenantPlan");
+    await signIn("owner.alpha@demo.sorveteria.test");
     await expect(assignPlan({ tenantId: created.data.tenantId, planId: "pro", subscriptionStatus: "trial", reason: "Tentativa sem autorização" }))
       .rejects.toMatchObject({ code: "functions/permission-denied" });
     await signIn("platform@demo.sorveteria.test");
@@ -112,8 +118,10 @@ describe("fluxo essencial em dois tenants", () => {
       .rejects.toMatchObject({ code: "functions/resource-exhausted" });
     await expect(addMember({ tenantId: "tenant-alpha", email: "driver.beta@demo.sorveteria.test", role: "driver" }))
       .rejects.toMatchObject({ code: "functions/resource-exhausted" });
-    const counter = await getDoc(doc(db, "tenants/tenant-alpha/commercialMeta/limitCounters"));
-    expect(counter.exists()).toBe(false);
+    // Internal commercial counters are deliberately invisible to client SDKs.
+    // Read through Admin SDK only inside this emulator-only integration fixture.
+    const counter = await getAdminFirestore(adminApp).doc("tenants/tenant-alpha/commercialMeta/limitCounters").get();
+    expect(counter.exists).toBe(false);
   });
 
   it("resolve tenant, recalcula pedido no servidor e fecha entrega com código single-use", async () => {
