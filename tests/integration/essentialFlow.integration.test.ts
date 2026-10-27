@@ -103,7 +103,10 @@ describe("fluxo essencial em dois tenants", () => {
     expect(audit.docs.map((entry) => entry.data().action)).toEqual(expect.arrayContaining([
       "tenant.created", "tenant.reactivated", "tenant.plan_assigned", "tenant.context_entered", "tenant.suspended",
     ]));
-    const planAudit = audit.docs.find((entry) => entry.data().action === "tenant.plan_assigned");
+    const planAudits = audit.docs.filter((entry) => entry.data().action === "tenant.plan_assigned");
+    expect(planAudits).toHaveLength(2);
+    const planAudit = planAudits.find((entry) => entry.data().reason === "Avaliação comercial aprovada");
+    expect(planAudit).toBeDefined();
     expect(planAudit?.data()).toMatchObject({ reason: "Avaliação comercial aprovada", metadata: { previous: { planId: null, subscriptionStatus: null }, next: { planId: "pro", subscriptionStatus: "trial" } } });
 
     await signIn("owner.alpha@demo.sorveteria.test");
