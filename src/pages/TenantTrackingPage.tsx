@@ -15,57 +15,53 @@ const labels: Record<string, string> = {
 
 export function TenantTrackingPage() {
   const { tenant, loading: tenantLoading, error: tenantError } = useTenant();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const urlCode = (params.get("code") || "").trim().toUpperCase();
-  const [code, setCode] = useState(urlCode);
+  // Draft input remains linked to the current URL even after client-side navigation.
+  const [draft, setDraft] = useState({ urlCode, value: urlCode });
+  const code = draft.urlCode === urlCode ? draft.value : urlCode;
   const requestGate = useRef(createTrackingRequestGate());
   const tenantId = tenant?.id;
-  const [tracking, setTracking] = useState<PublicTracking | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [lookup, setLookup] = useState<{
+    tenantId: string; code: string; retry: number;
+    tracking: PublicTracking | null; error: string | null;
+  } | null>(null);
 
-  // Load deep links automatically, discard stale responses on tenant/code changes.
+  // Effect only synchronizes the external Firestore read. Render-derived state
+  // masks old tenant/code results immediately, without synchronous setState.
   useEffect(() => {
     const gate = requestGate.current;
     const token = gate.begin();
-    setCode(urlCode);
-    setTracking(null);
-    setError(null);
-    setSearched(false);
-    setLoading(false);
     if (!tenantId || !urlCode) return () => { gate.invalidate(); };
-    setLoading(true);
-    setSearched(true);
     void findPublicTracking(tenantId, urlCode).then((result) => {
       if (!gate.isCurrent(token)) return;
-      setTracking(result);
-      if (!result) setError("Não encontramos esse pedido nesta sorveteria. Confira o código e tente novamente.");
+      setLookup({
+        tenantId, code: urlCode, retry, tracking: result,
+        error: result ? null : "Não encontramos esse pedido nesta sorveteria. Confira o código e tente novamente.",
+      });
     }).catch((lookupError: unknown) => {
       if (!gate.isCurrent(token)) return;
-      setError(lookupError instanceof Error ? lookupError.message : "Não foi possível consultar o pedido agora.");
-    }).finally(() => {
-      if (gate.isCurrent(token)) setLoading(false);
+      setLookup({
+        tenantId, code: urlCode, retry, tracking: null,
+        error: lookupError instanceof Error ? lookupError.message : "Não foi possível consultar o pedido agora.",
+      });
     });
     return () => { gate.invalidate(); };
-  }, [tenantId, urlCode]);
+  }, [tenantId, urlCode, retry]);
 
-  async function search(event: FormEvent<HTMLFormElement>) {
+  const activeLookup = lookup?.tenantId === tenantId && lookup?.code === urlCode && lookup?.retry === retry ? lookup : null;
+  const loading = Boolean(tenantId && urlCode && !activeLookup);
+  const searched = Boolean(urlCode && tenantId);
+  const tracking = activeLookup?.tracking ?? null;
+  const error = activeLookup?.error ?? null;
+
+  function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!tenant) return;
-    const token = requestGate.current.begin();
-    setLoading(true); setError(null); setSearched(true); setTracking(null);
-    try {
-      const result = await findPublicTracking(tenant.id, code);
-      if (!requestGate.current.isCurrent(token)) return;
-      setTracking(result);
-      if (!result) setError("Não encontramos esse pedido nesta sorveteria. Confira o código e tente novamente.");
-    } catch (lookupError) {
-      if (!requestGate.current.isCurrent(token)) return;
-      setError(lookupError instanceof Error ? lookupError.message : "Não foi possível consultar o pedido agora.");
-    } finally {
-      if (requestGate.current.isCurrent(token)) setLoading(false);
-    }
+    const normalized = code.trim().toUpperCase();
+    if (normalized === urlCode) setRetry((current) => current + 1);
+    else setParams({ code: normalized });
   }
 
   if (tenantLoading) return <LoadingState label="Carregando loja..." />;
@@ -76,7 +72,7 @@ export function TenantTrackingPage() {
     <p className="muted">Informe o código público recebido após finalizar o pedido.</p>
     <form className="tracking-form" onSubmit={(event) => void search(event)}>
       <label htmlFor="publicCode">Código do pedido</label>
-      <input id="publicCode" name="publicCode" placeholder="Ex.: SV-A7K4P2Q9" autoComplete="off" maxLength={11} value={code} onChange={(event) => setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} />
+      <input id="publicCode" name="publicCode" placeholder="Ex.: SV-A7K4P2Q9" autoComplete="off" maxLength={11} value={code} onChange={(event) => setDraft({ urlCode, value: event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "") })} />
       <button className="button primary" type="submit" disabled={loading || code.length < 3}>{loading ? "Consultando..." : "Ver pedido"}</button>
     </form>
     {error && <p className="error-text" role="alert">{error}</p>}
