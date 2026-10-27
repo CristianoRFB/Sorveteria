@@ -30,7 +30,8 @@ function commercialAccess(tenant, options = {}) {
     if (tenant.planId !== planCatalog.trial.planId) return { allowed: false, reason: "invalid-trial", plan };
     const until = timestampMillis(tenant.trialUntil);
     if (!Number.isFinite(until)) return { allowed: false, reason: "invalid-trial", plan };
-    if (options.nowMs >= until) return { allowed: false, reason: "trial-expired", plan };
+    const nowMs = options.nowMs === undefined ? Date.now() : options.nowMs;
+    if (!Number.isFinite(nowMs) || nowMs >= until) return { allowed: false, reason: "trial-expired", plan };
     return { allowed: true, reason: null, plan };
   }
   if (tenant.subscriptionStatus === "suspended") return { allowed: false, reason: "subscription-suspended", plan };
