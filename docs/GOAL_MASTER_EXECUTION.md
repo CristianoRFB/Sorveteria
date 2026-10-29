@@ -80,3 +80,18 @@ Os registros de F0 acima são históricos. Para continuidade, prevalece o estado
 | F6 — documentação final | Este checkpoint atualizado; documentação final/versionamento canônico ainda pendentes. |
 
 **Próxima ação de implementação (sem reiniciar auditoria):** confirmar o novo SHA da branch; preparar preflight de staging somente leitura, diagnosticar timeouts causais em E2E repetido e completar runbooks/artefatos de segurança; executar todos os gates afetados. **Não interpretar CI no projeto `demo-sorveteria` como staging real.**
+
+## Continuação publicada — 2026-10-29 | F3/F5 preparação, F2 diagnósticos
+
+- Baseline técnico de retomada desta rodada: `9422319f550ccae0731386307fb2953d78736a7a`.
+- Preflight offline `scripts/release-preflight.mjs` e avaliação estrutural `scripts/lib/release-readiness.mjs`, com testes de ausência de autorização, separação de staging/produção, rejeição de arquivos sensíveis, SHA, Rules, índices, Firebase Node 22 e decisão explícita sobre migração real.
+- `docs/RELEASE_PREFLIGHT.md` documenta preparação, backup/restore, rollback, evidências e autorizações independentes para staging, produção e migração; nenhum recurso externo foi provisionado.
+- `.env.example` permanece público/permitido; segredos reais `.env.*`, certificados e service accounts são proibidos no Git.
+- Teste de tracking adicional no Firebase Emulator faz 24 leituras repetidas e concorrentes de um código Alpha, verifica ausência de campos privados e impede que o código represente um pedido Beta. Execução intermediária observou 24/24 leituras, latência máxima de 825 ms. **Não substitui** repetição do tracking via navegador.
+- Builds hospedados passam a rejeitar projeto demo, configurações Firebase incompletas e emuladores locais.
+- `docs/CURRENT.md` e `README.md` foram sincronizados com a branch de implementação e não declaram staging ou produção como concluídos.
+- CI observada para `740e89642c207d928ec8e96054ef0940e0a7647b`: dois workflows concluíram com sucesso, incluindo preflight que reporta `BLOCKED` para produção sem evidências. A CI completa do código posterior deve ser consultada por SHA, sem presumir aprovação.
+- `ESTIMATIVA_GERAL=79%` até prontidão de produção; percentual **estimado**, não métrica comprovada por staging.
+- **Bloqueios externos:** destino/conta/permissão/custos do Firebase staging, autorização explícita de provisionamento, evidências de backup/restore e rollback, testes E2E repetidos no navegador, piloto real, autorização separada de produção e de qualquer migração real.
+
+**NEXT_ACTION:** verificar CI do último SHA e corrigir falhas reais; executar diagnóstico causal de tracking no navegador, preparar infraestrutura de staging só após autorização específica. Não reiniciar auditoria geral.
