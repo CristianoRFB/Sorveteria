@@ -6,6 +6,7 @@ import type { PublicTracking } from "@/domain/tracking";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { createTrackingRequestGate } from "@/domain/trackingRequestGate";
+import { isTerminalTrackingStatus, trackingRefreshDelayMs } from "@/domain/trackingRefresh";
 
 const labels: Record<string, string> = {
   received: "Pedido recebido", confirmed: "Pedido confirmado", preparing: "Em preparo", ready: "Pedido pronto",
@@ -25,7 +26,7 @@ export function TenantTrackingPage() {
   const [retry, setRetry] = useState(0);
   const [lookup, setLookup] = useState<{
     tenantId: string; code: string; retry: number;
-    tracking: PublicTracking | null; error: string | null;
+    tracking: PublicTracking | null; error: string | null; failures: number;
   } | null>(null);
 
   // Effect only synchronizes the external Firestore read. Render-derived state
@@ -37,14 +38,19 @@ export function TenantTrackingPage() {
     void findPublicTracking(tenantId, urlCode).then((result) => {
       if (!gate.isCurrent(token)) return;
       setLookup({
-        tenantId, code: urlCode, retry, tracking: result,
+        tenantId, code: urlCode, retry, tracking: result, failures: 0,
         error: result ? null : "Não encontramos esse pedido nesta sorveteria. Confira o código e tente novamente.",
       });
     }).catch((lookupError: unknown) => {
       if (!gate.isCurrent(token)) return;
-      setLookup({
-        tenantId, code: urlCode, retry, tracking: null,
-        error: lookupError instanceof Error ? lookupError.message : "Não foi possível consultar o pedido agora.",
+      setLookup((previous) => {
+        const sameContext = previous?.tenantId === tenantId && previous?.code === urlCode;
+        return {
+          tenantId, code: urlCode, retry,
+          tracking: sameContext ? previous.tracking : null,
+          failures: sameContext ? previous.failures + 1 : 1,
+          error: lookupError instanceof Error ? lookupError.message : "Não foi possível consultar o pedido agora.",
+        };
       });
     });
     return () => { gate.invalidate(); };
@@ -53,8 +59,36 @@ export function TenantTrackingPage() {
   const activeLookup = lookup?.tenantId === tenantId && lookup?.code === urlCode && lookup?.retry === retry ? lookup : null;
   const loading = Boolean(tenantId && urlCode && !activeLookup);
   const searched = Boolean(urlCode && tenantId);
-  const tracking = activeLookup?.tracking ?? null;
+  // Never display a tracking status from another tenant or public code.
+  const previousTracking = lookup?.tenantId === tenantId && lookup?.code === urlCode ? lookup.tracking : null;
+  const tracking = activeLookup?.tracking ?? (loading ? previousTracking : null);
   const error = activeLookup?.error ?? null;
+
+  useEffect(() => {
+    const status = activeLookup?.tracking?.status;
+    if (!tenantId || !urlCode || !status || isTerminalTrackingStatus(status)) return;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const clear = () => {
+      if (timeout !== null) clearTimeout(timeout);
+      timeout = null;
+    };
+    const schedule = () => {
+      if (document.visibilityState !== "visible") return;
+      timeout = setTimeout(() => setRetry((value) => value + 1), trackingRefreshDelayMs(activeLookup?.failures ?? 0));
+    };
+    const onVisibilityChange = () => {
+      clear();
+      if (document.visibilityState === "visible") {
+        setRetry((value) => value + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    schedule();
+    return () => {
+      clear();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [tenantId, urlCode, activeLookup?.tracking?.status, activeLookup?.retry, activeLookup?.failures]);
 
   function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,6 +110,7 @@ export function TenantTrackingPage() {
       <button className="button primary" type="submit" disabled={loading || code.length < 3}>{loading ? "Consultando..." : "Ver pedido"}</button>
     </form>
     {error && <p className="error-text" role="alert">{error}</p>}
+    {error && tracking && <p className="muted" role="status">Mostrando a última atualização conhecida; os dados podem estar desatualizados.</p>}
     {searched && !loading && !error && !tracking && <p className="muted">Nenhuma atualização disponível.</p>}
     {tracking && <section className="tracking-result">
       <div className="tracking-result-heading"><div><span className="eyebrow">Pedido {tracking.publicCode}</span><h2>{labels[tracking.status] || tracking.status}</h2></div><span className={`status-pill status-${tracking.status}`}>{labels[tracking.status] || tracking.status}</span></div>
