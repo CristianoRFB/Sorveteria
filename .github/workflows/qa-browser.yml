@@ -100,6 +100,7 @@ jobs:
         env:
           SORVETERIA_QA_BROWSER: /usr/bin/google-chrome
           SORVETERIA_QA_CDP_PORT: '9333'
+          SORVETERIA_QA_OUTPUT_DIR: .qa/screenshots
         run: npm run qa:screenshots
       - name: Upload only synthetic screenshots and sanitized QA diagnostics
         if: always()
@@ -107,7 +108,7 @@ jobs:
         with:
           name: sorv-browser-qa-${{ github.run_id }}
           path: |
-            docs/versions/v06-multitenant-core-ready/screenshots/*.png
+            .qa/screenshots/*.png
             .qa/*.json
           if-no-files-found: warn
           retention-days: 7

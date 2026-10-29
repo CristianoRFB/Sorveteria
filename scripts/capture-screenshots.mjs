@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import { createQaNetworkTrace } from "./lib/qaNetworkTrace.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outputDir = path.join(root, "docs/versions/v06-multitenant-core-ready/screenshots");
+const outputDir = process.env.SORVETERIA_QA_OUTPUT_DIR
+  ? path.resolve(root, process.env.SORVETERIA_QA_OUTPUT_DIR)
+  : path.join(root, "docs/versions/v06-multitenant-core-ready/screenshots");
 const baseUrl = "http://127.0.0.1:5173";
 const cdpPort = process.env.SORVETERIA_QA_CDP_PORT || "9333";
 const cdp = "http://127.0.0.1:" + cdpPort;
