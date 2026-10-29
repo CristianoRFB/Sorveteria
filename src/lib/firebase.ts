@@ -1,9 +1,10 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { connectFirestoreEmulator, initializeFirestore } from "firebase/firestore";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
 import { hostedFirebaseConfigurationProblems } from "@/domain/firebaseDeploymentGuard";
+import { firestoreTransportSettings } from "@/domain/firestoreTransport";
 
 const configuredValues = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -37,7 +38,7 @@ const firebaseConfig = {
 
 export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
-export const db = getFirestore(firebaseApp);
+export const db = initializeFirestore(firebaseApp, firestoreTransportSettings(usingFirebaseEmulators));
 export const storage = getStorage(firebaseApp);
 export const functions = getFunctions(firebaseApp, "southamerica-east1");
 
