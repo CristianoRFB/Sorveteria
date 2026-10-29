@@ -55,3 +55,28 @@ Tracking intermitente permanece um problema conhecido da v06 e ainda não foi re
 `NEEDS_USER_ACTION`: confirmar destino, conta/permissões e autorização para provisionar/deployar staging, além de região/plano/custos, antes de qualquer cloud real. Autorização de staging não autoriza produção nem migração de dados reais.
 
 `NEXT_ACTION`: implementar o catálogo de planos e a resolução de entitlement com fail-closed para estado comercial ausente/inválido; migrar somente fixtures/emulador; adicionar testes unitários antes de aplicar gates nas Functions.
+
+## Checkpoint de implementação — 2026-10-29 (GitHub Chat)
+
+Os registros de F0 acima são históricos. Para continuidade, prevalece o estado desta seção.
+
+- Branch: `codex/goal-master-sorveteria-production-readiness`.
+- Baseline anterior: `2fa883704825935be79ffbdb762fc145f7ccc3cb`; `main` não foi modificada.
+- Código publicado: proteção contra `planId` herdado de `Object.prototype`, validação de trial/assinatura inválida, checkout idempotente em transação Firestore, replay sem segredo de entrega, tentativas persistentes por tenant no cliente, tracking com timeout/retry visível e atualização que pausa ao ocultar a aba ou concluir o pedido.
+- Regressões publicadas: limites de plano, relógio inválido, checkout idempotente, timeout, política de refresh e teste com chamadas concorrentes no Emulator Suite.
+- Correção da vulnerabilidade `GHSA-gg6h-894w-4m9c`: dependência transitiva `re2js` atualizada de 2.8.6 para 2.8.7 e fixada em `package.json` / `package-lock.json`.
+- Evidência de qualidade: GitHub Actions para `f2c4cecb927c629764a47d5d81679b2e62bebec9`, runs `40972523836` e `40972530754`, ambas concluídas com **success**. Nos gates anteriores da mesma sequência houve **66/66 testes unitários**, **11/11 Rules** e **4/4 integração**, incluindo concorrência do checkout; build/lint/documentação passaram. `npm audit --omit=dev --audit-level=high` foi aprovado após a correção da dependência.
+- Prontidão geral estimada: **~74%** até produção; estimativa de trabalho, **não** comprovação de staging ou go-live. Nenhuma cobrança automática, migração real, staging real ou deploy de produção foi realizado.
+
+### Estado por fase após os commits
+
+| Fase | Situação real |
+|---|---|
+| F1 — Global Standard | Implementação funcional de catálogo, entitlements e estados comerciais, com reforço fail-closed; critérios de operação real ainda sujeitos à homologação. |
+| F2 — estabilidade | Checkout idempotente e concorrência aprovados no Emulator Suite. Tracking ficou mais resiliente; diagnóstico causal de timeouts intermitentes em navegador e E2E prolongado ainda pendente. |
+| F3 — infraestrutura/staging | Configuração e credenciais de ambiente externo não foram autorizadas; não provisionar por inferência. |
+| F4 — homologação | Piloto/cliente e staging real não executados. |
+| F5 — go-live | PROIBIDO até autorização explícita, confirmação do destino, backup/rollback e preflight aprovado. |
+| F6 — documentação final | Este checkpoint atualizado; documentação final/versionamento canônico ainda pendentes. |
+
+**Próxima ação de implementação (sem reiniciar auditoria):** confirmar o novo SHA da branch; preparar preflight de staging somente leitura, diagnosticar timeouts causais em E2E repetido e completar runbooks/artefatos de segurança; executar todos os gates afetados. **Não interpretar CI no projeto `demo-sorveteria` como staging real.**
