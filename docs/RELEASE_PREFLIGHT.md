@@ -57,3 +57,9 @@ O script sai com código **2** quando há bloqueios e marca `EXTERNAL_REVIEW_REQ
 - E2E do navegador repetido **sem timeout intermitente** e diagnóstico de falhas com traces sem segredos.
 - Staging real homologado e cliente piloto apenas quando realmente houver.
 - Go-live condicionado à autorização explícita e preflight manual; a aplicação nunca se autodeclara em produção.
+
+## Migração de dados reais
+
+No preflight de produção, informar obrigatoriamente `"migrationMode": "none"` quando não houver migração planejada, ou `"migrationMode": "required"` junto com uma referência documental separada em `"migrationApprovalRef"`. Mesmo com essas referências, o resultado máximo permanece `EXTERNAL_REVIEW_REQUIRED`; sem comprovação de autorização, a migração não pode acontecer.
+
+O arquivo público `.env.example` é um **modelo sem credenciais** e pode ser versionado; arquivos reais `.env.*` são ignorados e proibidos no Git. A verificação de paths do preflight não revela o conteúdo de variáveis nem segredos.

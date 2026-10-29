@@ -2,7 +2,7 @@
 const SHA = /^[a-f0-9]{40}$/i;
 const META_KEYS = [
   "environment", "projectId", "stagingProjectId", "domain", "sourceSha",
-  "approvalRef", "accessRef", "costRef", "backupRef", "restoreRef",
+  "approvalRef", "accessRef", "costRef", "migrationMode", "migrationApprovalRef", "backupRef", "restoreRef",
   "rollbackRef", "securityRef", "pilotRef", "stagingEvidenceRef", "monitoringRef",
 ];
 const RELEASE_FILES = [
@@ -52,12 +52,16 @@ export function assessReleasePlan(meta = {}, context = {}) {
     && config.firestore?.indexes === "firestore.indexes.json"
     && config.storage?.rules === "storage.rules"), "firebase.json precisa apontar para Node 22, Rules e índices canônicos.");
   const tracked = context.trackedPaths ?? [];
-  gate("tracked-secrets", !tracked.some(path => SENSITIVE_TRACKED.test(path)),
+  gate("tracked-secrets", !tracked.some(path => !/(?:^|\/)\.env\.(?:example|sample)$/i.test(path) && SENSITIVE_TRACKED.test(path)),
     "Há caminho sensível versionado; remova-o do Git e trate eventual exposição.");
   if (validEnv) {
     const required = env === "production" ? REQUIRED_PRODUCTION : REQUIRED_STAGING;
     for (const key of required) gate(key, isReference(meta?.[key]), "Informe referência documental não secreta para "+key+".");
     if (env === "production") {
+      gate("migration-decision", ["none", "required"].includes(meta?.migrationMode),
+        "Indique migrationMode=none ou required; não presuma migração de dados reais.");
+      if (meta?.migrationMode === "required") gate("migrationApprovalRef", isReference(meta?.migrationApprovalRef),
+        "Migração de dados reais exige aprovação explícita e separada do deploy.");
       gate("distinct-staging", isExternalProjectId(meta?.stagingProjectId) && meta.stagingProjectId !== meta.projectId,
         "Produção exige stagingProjectId real e distinto do projeto de produção.");
     } else if (meta?.stagingProjectId !== undefined) {

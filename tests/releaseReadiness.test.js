@@ -10,7 +10,7 @@ const staging = {
 };
 const production = {
   ...staging,environment:"production",projectId:"sorveteria-production-77",domain:"sorveteria.com.br",
-  stagingProjectId:staging.projectId,backupRef:"evidence/backup-001",restoreRef:"evidence/restore-001",
+  stagingProjectId:staging.projectId,migrationMode:"none",backupRef:"evidence/backup-001",restoreRef:"evidence/restore-001",
   rollbackRef:"runbook/rollback-001",securityRef:"review/security-001",
   pilotRef:"evidence/pilot-001",stagingEvidenceRef:"evidence/staging-001",
   monitoringRef:"runbook/monitoring-001",
@@ -52,6 +52,19 @@ describe("offline release preflight is fail-closed and never authorizes deployme
     const result=assessReleasePlan(production,context);
     expect(result.blockers).toEqual([]);
     expect(result.decision).toBe("EXTERNAL_REVIEW_REQUIRED");
+  });
+  it("allows versioned non-secret .env.example but blocks actual .env files",()=>{
+    const expected=assessReleasePlan(staging,{...context,trackedPaths:[".env.example","src/main.tsx"]});
+    expect(expected.blockers).not.toContain("tracked-secrets");
+    const unsafe=assessReleasePlan(staging,{...context,trackedPaths:[".env.production"]});
+    expect(unsafe.blockers).toContain("tracked-secrets");
+  });
+  it("real data migration requires a separate explicit approval",()=>{
+    const missing=assessReleasePlan({...production,migrationMode:"required"},context);
+    expect(missing.blockers).toContain("migrationApprovalRef");
+    const provided=assessReleasePlan({...production,migrationMode:"required",migrationApprovalRef:"approval/MIGRATION-001"},context);
+    expect(provided.blockers).toEqual([]);
+    expect(provided.decision).toBe("EXTERNAL_REVIEW_REQUIRED");
   });
   it("rejects unknown fields so passwords cannot be smuggled into a release manifest",()=>{
     expect(assessReleasePlan({...staging,adminPassword:"do-not-log"},context).blockers).toContain("manifest-fields");
