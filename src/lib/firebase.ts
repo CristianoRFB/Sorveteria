@@ -3,6 +3,7 @@ import { connectAuthEmulator, getAuth } from "firebase/auth";
 import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
+import { hostedFirebaseConfigurationProblems } from "@/domain/firebaseDeploymentGuard";
 
 const configuredValues = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -15,6 +16,15 @@ const configuredValues = {
 
 export const firebaseConfigured = Object.values(configuredValues).every(Boolean);
 export const usingFirebaseEmulators = import.meta.env.VITE_USE_EMULATORS === "true";
+const unsafeHostedBuild = hostedFirebaseConfigurationProblems(
+  import.meta.env.PROD,
+  usingFirebaseEmulators,
+  configuredValues,
+);
+if (unsafeHostedBuild.length) {
+  throw new Error("Firebase bloqueado para build hospedado: " + unsafeHostedBuild.join(", "));
+}
+
 
 const firebaseConfig = {
   apiKey: configuredValues.apiKey || "demo-api-key",

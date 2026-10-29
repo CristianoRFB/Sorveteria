@@ -63,3 +63,7 @@ O script sai com código **2** quando há bloqueios e marca `EXTERNAL_REVIEW_REQ
 No preflight de produção, informar obrigatoriamente `"migrationMode": "none"` quando não houver migração planejada, ou `"migrationMode": "required"` junto com uma referência documental separada em `"migrationApprovalRef"`. Mesmo com essas referências, o resultado máximo permanece `EXTERNAL_REVIEW_REQUIRED`; sem comprovação de autorização, a migração não pode acontecer.
 
 O arquivo público `.env.example` é um **modelo sem credenciais** e pode ser versionado; arquivos reais `.env.*` são ignorados e proibidos no Git. A verificação de paths do preflight não revela o conteúdo de variáveis nem segredos.
+
+## Proteção adicional no frontend
+
+Em builds hospedados (`import.meta.env.PROD=true`), o módulo de Firebase impede inicialização com configurações públicas ausentes, projeto `demo-*`, domínio Auth `localhost` ou `VITE_USE_EMULATORS=true`. O CI pode compilar a aplicação com variáveis sintéticas, mas **a aplicação hospedada não pode iniciar** apontando para o ambiente de demonstração. Isso não substitui a revisão do bundle final do staging nem a aprovação de deploy.
