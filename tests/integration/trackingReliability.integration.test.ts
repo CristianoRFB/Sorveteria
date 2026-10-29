@@ -54,13 +54,18 @@ describe("public tracking: repeated reads and tenant boundary",() => {
     const durations: number[] = [];
     const bounded = async () => {
       const start=Date.now();
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<never>((_,reject)=>{
-        setTimeout(()=>reject(new Error("Tracking read exceeded emulator diagnostic deadline")),20_000);
+        timer=setTimeout(()=>reject(new Error("Tracking read exceeded emulator diagnostic deadline")),20_000);
       });
-      // Avoid timing-only claims: assert document content, not just request duration.
-      const response = await Promise.race([getDoc(alphaTracking),deadline]);
-      durations.push(Date.now()-start);
-      return response;
+      try {
+        // Assert both latency and content; clean up all deadline timers.
+        const response = await Promise.race([getDoc(alphaTracking),deadline]);
+        durations.push(Date.now()-start);
+        return response;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     };
     for (let round=0;round<3;round++) {
       const reads = await Promise.all(Array.from({length:8},()=>bounded()));
