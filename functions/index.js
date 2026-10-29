@@ -5,6 +5,7 @@ const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeValid } = require("./domain/delivery.cjs");
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
+const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -588,7 +589,19 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
   };
   const address = fulfillmentMode === "delivery" ? validateAddress(data.address) : null;
   const paymentMethodId = requireText(data.paymentMethodId, "Forma de pagamento", 40);
+  let requestId;
+  try { requestId = normalizeCheckoutRequestId(data.requestId); }
+  catch (error) { fail("invalid-argument", error.message); }
   const tenantRef = db.doc(`tenants/${tenantId}`);
+  // Backwards-compatible: old checkout clients may omit requestId during rollout.
+  const idempotencyRef = requestId
+    ? tenantRef.collection("checkoutRequests").doc(checkoutDocumentId(tenantId, request.auth?.uid || null, requestId))
+    : null;
+  let fingerprint = null;
+  if (idempotencyRef) {
+    try { fingerprint = checkoutFingerprint({ tenantId, fulfillmentMode, customer, address, paymentMethodId, items: data.items }); }
+    catch (error) { fail("invalid-argument", error.message); }
+  }
   const orderRef = tenantRef.collection("orders").doc();
   const trackingCode = generatedCode("SV-");
   const deliveryCode = fulfillmentMode === "delivery" ? generatedCode() : null;
@@ -606,6 +619,13 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
     ]);
     const [tenantSnapshot, settingsSnapshot, trackingSnapshot, ...productSnapshots] = snapshots;
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria indisponível para novos pedidos.");
+    // Atomic: competing transactions cannot both create the same marker.
+    const existingRequest = idempotencyRef ? await transaction.get(idempotencyRef) : null;
+    if (existingRequest?.exists) {
+      try { result = replayCheckout(existingRequest.data(), fingerprint); }
+      catch (error) { fail("already-exists", error.message); }
+      return;
+    }
     if (trackingSnapshot.exists) fail("aborted", "Gere o pedido novamente.");
     const tenant = tenantSnapshot.data();
     requireCommercialFeature(tenant, "online_menu");
@@ -678,7 +698,10 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
       hash: deliveryCodeHash(deliveryCode, tenantId, orderRef.id),
       createdAt,
     });
-    result = { orderId: orderRef.id, publicCode: trackingCode, deliveryCode };
+    if (idempotencyRef) transaction.create(idempotencyRef, {
+      fingerprint, orderId: orderRef.id, publicCode: trackingCode, createdAt,
+    });
+    result = { orderId: orderRef.id, publicCode: trackingCode, deliveryCode, replayed: false };
   });
   return result;
 });

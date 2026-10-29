@@ -8,6 +8,7 @@ import { loadTenantSettings, type TenantSettings } from "@/services/tenantSettin
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { canUseTenantFeature, featureAccessMessage } from "@/domain/entitlements";
+import { checkoutAttemptId, clearCheckoutAttemptId } from "@/domain/checkoutAttempt";
 
 function money(cents: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
@@ -22,6 +23,7 @@ export function CheckoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<CreatedOrder | null>(null);
   const submittingRef = useRef(false);
+  const requestIdRef = useRef<{ tenantId: string; id: string } | null>(null);
   const [fulfillmentMode, setFulfillmentMode] = useState<"delivery" | "pickup">("pickup");
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [address, setAddress] = useState({ street: "", number: "", neighborhood: "", reference: "" });
@@ -55,7 +57,10 @@ export function CheckoutPage() {
     submittingRef.current = true;
     setPending(true); setError(null);
     try {
+      const requestId = checkoutAttemptId(tenant.id, requestIdRef.current?.tenantId === tenant.id ? requestIdRef.current.id : null);
+      requestIdRef.current = { tenantId: tenant.id, id: requestId };
       const order = await createOrder({
+        requestId,
         tenantId: tenant.id,
         fulfillmentMode,
         customer,
@@ -64,6 +69,8 @@ export function CheckoutPage() {
         items,
       });
       clear();
+      clearCheckoutAttemptId(tenant.id);
+      requestIdRef.current = null;
       setCreatedOrder(order);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Não foi possível confirmar o pedido.");
@@ -78,6 +85,7 @@ export function CheckoutPage() {
     <p>A sorveteria recebeu seu pedido. Guarde o código para acompanhar o andamento.</p>
     <div className="code-panel"><small>Código público do pedido</small><strong>{createdOrder.publicCode}</strong><Link to={`/${tenant.slug}/acompanhar?code=${createdOrder.publicCode}`}>Acompanhar pedido</Link></div>
     {createdOrder.deliveryCode && <div className="delivery-code-notice"><strong>Código de confirmação da entrega</strong><span>{createdOrder.deliveryCode}</span><p>Mostre este código ao entregador quando seu pedido chegar. Ele é diferente do código de acompanhamento.</p></div>}
+    {createdOrder.replayed && createdOrder.deliveryCode === null && fulfillmentMode === "delivery" && <p className="notice" role="status">O pedido já havia sido recebido. Para recuperar um código de entrega perdido, solicite à sorveteria um novo código.</p>}
     {settings && settings.paymentMethods.find((method) => method.id === paymentMethodId)?.instructions && <div className="notice"><strong>Pagamento:</strong> {settings.paymentMethods.find((method) => method.id === paymentMethodId)?.instructions}</div>}
     <Link className="button secondary" to={`/${tenant.slug}`}>Voltar à loja</Link>
   </section></main>;
