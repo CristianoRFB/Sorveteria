@@ -20,7 +20,7 @@ describe("checkout idempotency boundary",()=>{
   it("rejects nested input and unexpected types",()=>{
     expect(()=>checkoutFingerprint({...payload,items:[null]})).toThrow();
     expect(()=>checkoutFingerprint({...payload,items:[{productId:"p",quantity:1,selections:{x:[[123]]}}]})).toThrow();
-    const cyclic={}; cyclic.self=cyclic;
+    const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
     expect(()=>checkoutFingerprint({...payload,address:{street:"Rua",number:"1",neighborhood:cyclic}})).toThrow();
     expect(checkoutFingerprint({...payload,fulfillmentMode:"pickup",address:cyclic})).toBe(checkoutFingerprint({...payload,fulfillmentMode:"pickup",address:null}));
   });
