@@ -277,8 +277,9 @@ try {
   if (!publicCode || !deliveryCode) throw new Error("A confirmação do pedido não mostrou os códigos esperados.");
   await capture("confirmacao-pedido.png");
   await navigate(`/tenant-alpha/acompanhar?code=${encodeURIComponent(publicCode)}`);
-  await clickButton("Ver pedido");
-  await waitText("Pedido recebido");
+  // Query runs automatically when ?code= is present; the submit button is disabled while loading.
+  // Clicking it during "Consultando..." is a test race, not a storefront failure.
+  await waitText("Pedido recebido", 45000);
   await capture("tracking-pedido.png");
 
   await clearOrigin();
