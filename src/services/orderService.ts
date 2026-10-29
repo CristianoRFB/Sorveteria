@@ -1,9 +1,8 @@
 import { httpsCallable } from "firebase/functions";
-import { doc, getDoc } from "firebase/firestore";
 import type { CartItem } from "@/domain/cart";
 import type { PublicTracking } from "@/domain/tracking";
 import { withTrackingLookupTimeout } from "@/domain/trackingTimeout";
-import { db, functions } from "@/lib/firebase";
+import { functions } from "@/lib/firebase";
 
 export type CheckoutInput = {
   tenantId: string;
@@ -36,10 +35,13 @@ export async function createOrder(input: CheckoutInput): Promise<CreatedOrder> {
 export async function findPublicTracking(tenantId: string, publicCode: string): Promise<PublicTracking | null> {
   const normalized = publicCode.trim().toUpperCase();
   if (!/^SV-[A-HJ-NP-Z2-9]{8}$/.test(normalized)) return null;
-  const snapshot = await withTrackingLookupTimeout(
-    getDoc(doc(db, "tenants", tenantId, "publicOrderTracking", normalized)),
+  // Fetch the public projection via HTTPS callable rather than the browser's
+  // Firestore streaming channel, which intermittently hung in emulator E2E.
+  const lookup = httpsCallable<{tenantId: string; publicCode: string}, {tracking: PublicTracking | null}>(
+    functions, "getPublicOrderTracking", {timeout: 20_000},
   );
-  return snapshot.exists() ? snapshot.data() as PublicTracking : null;
+  const result = await withTrackingLookupTimeout(lookup({tenantId, publicCode: normalized}), 30_000);
+  return result.data.tracking;
 }
 
 export async function changeOrderStatus(tenantId: string, orderId: string, status: string, reason?: string): Promise<void> {

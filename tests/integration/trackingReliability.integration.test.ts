@@ -78,6 +78,20 @@ describe("public tracking: repeated reads and tenant boundary",() => {
       }
     }
     expect(durations).toHaveLength(24);
+    // Also exercise the browser-independent HTTPS tracking transport.
+    const lookup = httpsCallable<{tenantId:string;publicCode:string},{tracking:{
+      publicCode:string;status:string;fulfillmentMode:string;timeline:Array<{status:string;at:string}>;
+    }|null}>(functions,"getPublicOrderTracking");
+    const calls = await Promise.all(Array.from({length:8},() =>
+      lookup({tenantId:"tenant-alpha",publicCode:data.publicCode})));
+    for(const item of calls){
+      expect(item.data.tracking).toMatchObject({publicCode:data.publicCode,status:"received",fulfillmentMode:"pickup"});
+      expect(item.data.tracking).not.toHaveProperty("customer");
+      expect(item.data.tracking).not.toHaveProperty("address");
+      expect(item.data.tracking).not.toHaveProperty("deliveryCode");
+    }
+    const badCode=await lookup({tenantId:"tenant-beta",publicCode:data.publicCode});
+    expect(badCode.data.tracking).toBeNull();
     console.info("tracking emulator reads:",durations.length,"max latency ms:",Math.max(...durations));
     const beta = doc(db,"tenants","tenant-beta","publicOrderTracking",data.publicCode);
     // A code issued by Alpha is never a readable Beta order.

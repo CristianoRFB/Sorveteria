@@ -5,6 +5,7 @@ const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeValid } = require("./domain/delivery.cjs");
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
+const { projectPublicTracking } = require("./domain/public-tracking.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
 if (!getApps().length) initializeApp();
@@ -704,6 +705,26 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
     result = { orderId: orderRef.id, publicCode: trackingCode, deliveryCode, replayed: false };
   });
   return result;
+});
+
+/**
+ * Public, tenant-scoped tracking read through HTTPS callable.
+ * Avoids browser Firestore streaming hangs observed in emulator E2E.
+ * No customer, address, payment or delivery confirmation data is returned.
+ */
+exports.getPublicOrderTracking = onCall({region:REGION,maxInstances:20}, async (request) => {
+  const tenantId = requireText(request.data?.tenantId, "Sorveteria", 128);
+  const code = requireText(request.data?.publicCode, "Codigo do pedido", 16).toUpperCase();
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId) || !/^SV-[A-HJ-NP-Z2-9]{8}$/.test(code))
+    fail("invalid-argument", "Identificador de acompanhamento invalido.");
+  const tenantRef = db.doc("tenants/" + tenantId);
+  const [tenant, order] = await Promise.all([
+    tenantRef.get(),
+    tenantRef.collection("publicOrderTracking").doc(code).get(),
+  ]);
+  if (!tenant.exists || tenant.data().status !== "active")
+    fail("not-found", "Acompanhamento indisponivel.");
+  return {tracking:order.exists ? projectPublicTracking(order.data(),code) : null};
 });
 
 exports.updateOrderStatus = onCall({ region: REGION }, async (request) => {
