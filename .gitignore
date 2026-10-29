@@ -18,3 +18,4 @@ coverage/
 *.p12
 *.pfx
 *.key
+.qa/

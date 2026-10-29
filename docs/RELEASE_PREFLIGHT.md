@@ -67,3 +67,11 @@ O arquivo público `.env.example` é um **modelo sem credenciais** e pode ser ve
 ## Proteção adicional no frontend
 
 Em builds hospedados (`import.meta.env.PROD=true`), o módulo de Firebase impede inicialização com configurações públicas ausentes, projeto `demo-*`, domínio Auth `localhost` ou `VITE_USE_EMULATORS=true`. O CI pode compilar a aplicação com variáveis sintéticas, mas **a aplicação hospedada não pode iniciar** apontando para o ambiente de demonstração. Isso não substitui a revisão do bundle final do staging nem a aprovação de deploy.
+
+## QA de navegador e diagnóstico local
+
+Rode `npm run qa:screenshots` com Emulator Suite e frontend local ativos. Em falhas, o script grava somente eventos de tempo/status do Firestore (8088) e Functions (5001) em `.qa/`, pasta ignorada no Git, sem URLs, dados de clientes ou credenciais.
+
+Configure `SORVETERIA_QA_BROWSER` para o caminho do Chrome/Edge instalado no computador e `SORVETERIA_QA_CDP_PORT` se 9333 estiver indisponível. Screenshots reais devem continuar separados de imagens conceituais e não comprovam staging/produção.
+
+Uma jornada completa no navegador deve ser repetida e ter evidências reais antes de considerar a falha intermitente de tracking encerrada.

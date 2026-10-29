@@ -8,8 +8,9 @@ import { createQaNetworkTrace } from "./lib/qaNetworkTrace.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputDir = path.join(root, "docs/versions/v06-multitenant-core-ready/screenshots");
 const baseUrl = "http://127.0.0.1:5173";
-const cdp = "http://127.0.0.1:9333";
-const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+const cdpPort = process.env.SORVETERIA_QA_CDP_PORT || "9333";
+const cdp = "http://127.0.0.1:" + cdpPort;
+const edge = process.env.SORVETERIA_QA_BROWSER || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const profileDir = path.join(os.tmpdir(), `sorveteria-doc-qa-${process.pid}`);
 const password = "GelatoDev!2026";
 let browser;
@@ -177,7 +178,7 @@ try {
   await mkdir(outputDir, { recursive: true });
   browser = spawn(edge, [
     "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
-    "--remote-allow-origins=*", "--remote-debugging-port=9333", `--user-data-dir=${profileDir}`,
+    "--remote-allow-origins=*", "--remote-debugging-port=" + cdpPort, `--user-data-dir=${profileDir}`,
     `${baseUrl}/`,
   ], { stdio: "ignore", windowsHide: true });
 
