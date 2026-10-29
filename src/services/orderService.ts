@@ -2,6 +2,7 @@ import { httpsCallable } from "firebase/functions";
 import { doc, getDoc } from "firebase/firestore";
 import type { CartItem } from "@/domain/cart";
 import type { PublicTracking } from "@/domain/tracking";
+import { withTrackingLookupTimeout } from "@/domain/trackingTimeout";
 import { db, functions } from "@/lib/firebase";
 
 export type CheckoutInput = {
@@ -35,7 +36,9 @@ export async function createOrder(input: CheckoutInput): Promise<CreatedOrder> {
 export async function findPublicTracking(tenantId: string, publicCode: string): Promise<PublicTracking | null> {
   const normalized = publicCode.trim().toUpperCase();
   if (!/^SV-[A-HJ-NP-Z2-9]{8}$/.test(normalized)) return null;
-  const snapshot = await getDoc(doc(db, "tenants", tenantId, "publicOrderTracking", normalized));
+  const snapshot = await withTrackingLookupTimeout(
+    getDoc(doc(db, "tenants", tenantId, "publicOrderTracking", normalized)),
+  );
   return snapshot.exists() ? snapshot.data() as PublicTracking : null;
 }
 
