@@ -23,6 +23,7 @@
     "docs:diagrams": "node scripts/docs-diagrams.mjs",
     "docs:check": "node scripts/docs-check.mjs",
     "docs:leads": "node scripts/docs-leads.mjs",
+    "release:preflight": "node scripts/release-preflight.mjs",
     "qa:screenshots": "node scripts/capture-screenshots.mjs"
   },
   "dependencies": {

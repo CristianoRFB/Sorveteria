@@ -62,6 +62,8 @@ jobs:
         run: npm run docs:check
       - name: Validate leads manifest (zero leads is valid)
         run: npm run docs:leads
+      - name: Release preflight smoke check (expected BLOCKED until externally verified)
+        run: npm run release:preflight -- --environment production --allow-blocked
       - name: Production dependency high/critical advisories
         run: npm audit --omit=dev --audit-level=high
       - name: Functions dependency high/critical advisories
