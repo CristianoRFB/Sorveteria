@@ -18,7 +18,10 @@ function timestampMillis(value) {
 
 function commercialAccess(tenant, options = {}) {
   if (!tenant || tenant.status !== "active") return { allowed: false, reason: "tenant-inactive", plan: null };
-  const plan = planCatalog.plans[tenant.planId];
+  // Fail closed for inherited names such as constructor, toString and __proto__.
+  const plan = Object.hasOwn(planCatalog.plans, tenant.planId)
+    ? planCatalog.plans[tenant.planId]
+    : null;
   if (!plan || typeof tenant.subscriptionStatus !== "string") return { allowed: false, reason: "plan-unassigned", plan: null };
 
   if (tenant.subscriptionStatus === "demo") {
