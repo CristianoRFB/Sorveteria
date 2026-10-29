@@ -75,3 +75,7 @@ Rode `npm run qa:screenshots` com Emulator Suite e frontend local ativos. Em fal
 Configure `SORVETERIA_QA_BROWSER` para o caminho do Chrome/Edge instalado no computador e `SORVETERIA_QA_CDP_PORT` se 9333 estiver indisponível. Screenshots reais devem continuar separados de imagens conceituais e não comprovam staging/produção.
 
 Uma jornada completa no navegador deve ser repetida e ter evidências reais antes de considerar a falha intermitente de tracking encerrada.
+
+## Evidência nova de tracking e QA
+
+O tracking público usa callable HTTP com projeção allowlist em vez de leituras Firestore WebChannel no navegador; o modo de conexão long polling foi habilitado **somente para Emulator Suite**. A primeira jornada completa do workflow de QA (run `40976263175`) passou e gerou 22 capturas novas com dados sintéticos. A CI `40976263189` aprovou 90 testes unitários, 11 Rules, 5 integrações e audits. Uma única jornada aprovada não encerra o histórico de intermitência: exigir repetições e, no staging autorizado, comparar navegação móvel, autenticação e tracking no ambiente real.

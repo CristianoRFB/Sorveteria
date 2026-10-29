@@ -95,3 +95,15 @@ Os registros de F0 acima são históricos. Para continuidade, prevalece o estado
 - **Bloqueios externos:** destino/conta/permissão/custos do Firebase staging, autorização explícita de provisionamento, evidências de backup/restore e rollback, testes E2E repetidos no navegador, piloto real, autorização separada de produção e de qualquer migração real.
 
 **NEXT_ACTION:** verificar CI do último SHA e corrigir falhas reais; executar diagnóstico causal de tracking no navegador, preparar infraestrutura de staging só após autorização específica. Não reiniciar auditoria geral.
+
+## Continuação F2/F3/F5 — evidências de 29/10/2026
+
+- **Código:** tracking público substituiu leitura WebChannel Firestore por callable HTTP `getPublicOrderTracking` com projeção allowlist. Não expõe dados privados, valida tenant ativo, código público e contrato de resposta. As Rules originais foram preservadas.
+- **Emulador:** `initializeFirestore` passou a usar `experimentalForceLongPolling` **somente quando VITE_USE_EMULATORS=true**. Configuração de produção fica intacta; a correção foi direcionada a travamentos reproduzidos no Chrome headless.
+- **Diagnóstico causal:** primeira QA automática falhou no seed antes da porta Auth iniciar; segundo erro era clique indevido no botão de tracking durante consulta automática; terceiro teste identificou travamento real de WebChannel (Firestore ~45s) no tracking; uma callable eliminou a falha de tracking, mas o painel Owner também revelou travamento de leituras, mitigado por configuração do SDK em emulador.
+- **Jornada completa de navegador:** GitHub Actions [run 40976263175](https://github.com/CristianoRFB/Sorveteria/actions/runs/40976263175) **PASS**, 22 capturas novas feitas de dados fictícios; inclui storefront desktop/mobile, checkout, tracking, painel Owner, entrega concluída, bloqueios Alpha×Beta, contexto Platform Owner, suspensão e reativação. Capturas dessa execução no artefato [sorv-browser-qa-40976263175](https://github.com/CristianoRFB/Sorveteria/actions/runs/40976263175/artifacts/12942503401). QA repetida ainda é gate independente.
+- **CI verificável:** GitHub Actions [run 40976263189](https://github.com/CristianoRFB/Sorveteria/actions/runs/40976263189) **PASS**: 90/90 unitários, 11/11 Firestore/Storage Rules, 5/5 integração; incluindo 24 leituras Firestore de tracking no Emulator Suite (latência máxima observada 611 ms). Lint, TypeScript/build, documentação e `npm audit` sem alertas de produção passaram.
+- **Staging e produção:** não provisionados; sem cliente piloto confirmado; nenhum deploy, migração real ou cobrança automática. `npm run release:preflight` continua fail-closed para qualquer ambiente sem manifestos e aprovação.
+- **Estado estimado:** `GENERAL_READINESS_ESTIMATE=82_PERCENT` — projeção de preparação, não declaração de ambiente de produção validado.
+
+**Próximas verificações críticas:** repetir E2E real no navegador e investigar qualquer nova intermitência; obter destino e autorização específica do staging; validar backup e restauração, IAM, secrets, monitoramento e piloto; somente depois preparar autorização independente de produção/migração.
