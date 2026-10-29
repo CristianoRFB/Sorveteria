@@ -15,7 +15,8 @@ export function hostedFirebaseConfigurationProblems(
   if (!hostedBuild) return [];
   const problems: string[] = [];
   if (usingEmulators) problems.push("emulators-enabled");
-  const values = Object.values(configured);
+  const values = [configured.apiKey, configured.authDomain, configured.projectId,
+    configured.storageBucket, configured.messagingSenderId, configured.appId];
   if (values.some(value => typeof value !== "string" || value.trim().length === 0)) {
     problems.push("missing-public-firebase-config");
   }
