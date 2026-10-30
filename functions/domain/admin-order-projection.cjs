@@ -9,7 +9,8 @@ const safeSelections = (raw) => {
   const result = Object.create(null);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   for (const [key,value] of Object.entries(raw)) {
-    if (/^[a-zA-Z0-9_-]{1,120}$/.test(key) && Array.isArray(value)) {
+    if (!["__proto__","constructor","prototype"].includes(key)
+      && /^[a-zA-Z0-9_-]{1,120}$/.test(key) && Array.isArray(value)) {
       result[key] = value.filter(x => typeof x === "string").slice(0,30);
     }
   }
