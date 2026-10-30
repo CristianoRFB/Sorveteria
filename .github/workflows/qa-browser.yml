@@ -13,6 +13,11 @@ on:
       - 'src/pages/TenantAdminPage.tsx'
       - 'src/pages/DriverPage.tsx'
       - 'functions/index.js'
+      - 'functions/domain/driver-assignment-projection.cjs'
+      - 'functions/domain/public-tracking.cjs'
+      - 'functions/domain/public-catalog.cjs'
+      - 'functions/domain/membership.cjs'
+      - 'firestore.rules'
       - 'src/lib/firebase.ts'
       - 'src/domain/firestoreTransport.ts'
   workflow_dispatch:

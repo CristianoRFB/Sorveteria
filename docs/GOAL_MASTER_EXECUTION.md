@@ -130,3 +130,17 @@ Os registros de F0 acima são históricos. Para continuidade, prevalece o estado
 - **Bloqueios externos inalterados:** projeto e credenciais de staging realmente autorizados, custos, IAM, secrets, backup/restauração comprovados, testes hospedados, piloto real quando houver, domínio e revisão dos alertas/rollback. Produção e qualquer migração de dados reais exigem autorização específica independente.
 
 **NEXT_ACTION:** prosseguir de `b9e8fa6b`, confirmar se a branch mudou e só repetir gates afetados; preparar documentação e infraestrutura de staging sem execução cloud até autorização. Preservar `main`, v05 comercial e v06 histórica.
+
+## Continuação de segurança — 30/10/2026 | backend, Rules e preflight
+
+- **Código verificado:** `3afa3cec64f0d69c37073a49afd24c4fffdbe533` nesta branch. `main` preservada.
+- **CI aprovada:** [run 41057102505](https://github.com/CristianoRFB/Sorveteria/actions/runs/41057102505), **112/112 unitários, 12/12 Firestore/Storage Rules e 20/20 integrações**. Build, TypeScript, ESLint, diagramas/documentos e auditorias de dependências concluídos; 0 vulnerabilidades nas auditorias de produção.
+- **Privacidade Driver:** projeção HTTPS allowlist de pedido, endereço, cliente e status; coerência obrigatória de `tenantId`, `driverId` e UID no backend. Rules agora negam aos entregadores leitura direta dos documentos brutos de `orders` e `deliveries`; o painel utiliza `getDriverAssignments`. Teste de integração verifica a negação e a leitura projetada.
+- **Privacidade Cardápio:** Rules negam leituras públicas brutas de `categories` e `products`; a API `getPublicCatalog` mantém a projeção pública autorizada, paginação e isolamento Alpha/Beta.
+- **Tracking:** eventos `delivery_attempt_failed` podem aparecer na timeline pública; não podem ser usados como status principal do pedido. UI traduz essa tentativa e teste unitário cobre a regressão.
+- **Membership:** Firestore `membership` precisa conter exatamente o tenant e UID esperados, mesmo quando o documento possui role privilegiada; validação inserida nos caminhos críticos de administração e entrega.
+- **Release:** preflight offline exige checkout Git limpo e SHA exato; domínios reservados de documentação não satisfazem gate. Continua **BLOCKED** sem evidências reais e aprovação.
+- **QA navegador:** as três jornadas (66 capturas) do checkpoint anterior continuam evidência histórica. O código endurecido desta sequência ainda requer sua própria execução/revisão no navegador. O workflow passou a reagir a alterações nas Rules e projeções de dados.
+- **Readiness:** `GENERAL_READINESS_ESTIMATE=88_PERCENT` (estimativa, não homologação). Sem staging autorizado, cloud real, piloto, cobrança automática, migração ou deploy de produção.
+
+**NEXT_ACTION:** consultar CI e Browser QA para o novo HEAD; corrigir somente os gates afetados. Obter autorização específica para staging e comprovar custos, IAM/secrets, backup/restauração e rollback antes de tentar qualquer deploy. Preservar v05 comercial e v06 histórica.
