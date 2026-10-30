@@ -107,3 +107,15 @@ Os registros de F0 acima são históricos. Para continuidade, prevalece o estado
 - **Estado estimado:** `GENERAL_READINESS_ESTIMATE=82_PERCENT` — projeção de preparação, não declaração de ambiente de produção validado.
 
 **Próximas verificações críticas:** repetir E2E real no navegador e investigar qualquer nova intermitência; obter destino e autorização específica do staging; validar backup e restauração, IAM, secrets, monitoramento e piloto; somente depois preparar autorização independente de produção/migração.
+
+## Continuação de implementação e evidências — 30/10/2026
+
+- **Fonte de continuidade:** branch `codex/goal-master-sorveteria-production-readiness`; código funcional validado no SHA `4bb76a6c58d790d78e19b3a97f5f2704cc41e6d8`.
+- **Catálogo público:** leitura por callable HTTPS de tenant ativo, projeção allowlist de categorias/produtos/opções, sem incluir metadados privados; testes negativos e isolamento Alpha/Beta. Paginação foi adicionada para não criar novo limite comercial de produtos.
+- **Entregadores:** leitura de entregas atribuídas por callable HTTPS autenticada, usando `request.auth.uid` e membership ativa `driver`, nunca o `driverId` fornecido pelo cliente. Somente os detalhes necessários de pedidos atribuídos retornam ao frontend. O painel desmonta e reinicializa quando mudam tenant ou identidade Firebase.
+- **Índice de produção:** criado índice composto `deliveries(driverId ASC, updatedAt DESC)` em `firestore.indexes.json`, junto com teste automatizado para a consulta atual.
+- **CI do código:** [GitHub Actions run 40991247401](https://github.com/CristianoRFB/Sorveteria/actions/runs/40991247401), **success**: 101/101 unitários, 11/11 Rules, 20/20 integração; TypeScript/build, lint e auditorias de dependências sem alertas. Preflight continua corretamente `BLOCKED` para produção não autorizada.
+- **QA real de navegador:** uma jornada sintética completa anterior foi aprovada com 22 screenshots; requisito de três jornadas completas em sessões separadas está em execução e **não** deve ser marcado como PASS até obter relatório final. Não houve staging real, piloto, migração ou go-live.
+- **Readiness estimado:** `GENERAL_READINESS_ESTIMATE=84_PERCENT`, apenas uma estimativa de avanço geral do GOAL MASTER. Não é autorização de deploy nem evidência de produção.
+- **Próximo gate:** verificar resultado das três jornadas; se houver falha, corrigir a partir de logs/artefatos sanitizados. Para F3-F5, exigir projeto/conta Firebase real, autorização de custo, IAM/secrets, staging isolado, backup/restauração e aprovação separada de produção/migração.
+
