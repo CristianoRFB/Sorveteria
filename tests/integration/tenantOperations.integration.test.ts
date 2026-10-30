@@ -35,6 +35,25 @@ async function login(email:string) {
 type CatalogSnapshot = {categories:Array<{id:string;name:string}>;products:Array<{id:string;name:string;categoryId:string}>};
 const catalog = (tenantId:string) =>
   httpsCallable<{tenantId:string},CatalogSnapshot>(functions,"getTenantAdminCatalog")({tenantId});
+type PublicCatalogResponse = {categories:Array<{id:string;active:boolean}>;products:Array<{id:string;available:boolean;categoryId:string}>};
+const publicCatalog=(tenantId:string)=>
+  httpsCallable<{tenantId:string},PublicCatalogResponse>(functions,"getPublicCatalog")({tenantId});
+describe("public catalogue tenant isolation",()=>{
+  it("serves unauthenticated Alpha/Beta only through active public collections",async()=>{
+    if(auth.currentUser)await signOut(auth);
+    const alpha=(await publicCatalog("tenant-alpha")).data;
+    const beta=(await publicCatalog("tenant-beta")).data;
+    expect(alpha.products.map(x=>x.id)).toContain("pot-classic");
+    expect(beta.products.map(x=>x.id)).toContain("pot-classic");
+    expect(alpha.products.every(x=>x.available && alpha.categories.some(c=>c.active&&c.id===x.categoryId))).toBe(true);
+    expect(JSON.stringify(alpha)).not.toMatch(/privateDeliveryCodes|deliveryCodeHash|customerId|paymentMethodId/);
+  });
+  it("denies malformed and nonexistent tenant IDs",async()=>{
+    await expect(publicCatalog("../tenant-beta")).rejects.toMatchObject({code:"functions/invalid-argument"});
+    await expect(publicCatalog("missing-tenant-123")).rejects.toMatchObject({code:"functions/not-found"});
+  });
+});
+
 describe("admin catalog snapshot permissions",()=>{
   it("denies unauthenticated users, drivers and cross-tenant Owners",async()=>{
     if(auth.currentUser)await signOut(auth);

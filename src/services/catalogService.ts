@@ -1,8 +1,7 @@
-import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import type { CatalogCategory, CatalogProduct } from "@/domain/catalog";
 import { catalogCategorySchema, catalogProductSchema, type CatalogCategoryInput, type CatalogProductInput } from "@/schemas/catalog";
-import { db, functions } from "@/lib/firebase";
+import { functions } from "@/lib/firebase";
 
 export async function listCatalog(tenantId: string): Promise<{ categories: CatalogCategory[]; products: CatalogProduct[] }> {
   const call = httpsCallable<{tenantId:string},{categories: CatalogCategory[];products: CatalogProduct[]}>(
@@ -12,14 +11,10 @@ export async function listCatalog(tenantId: string): Promise<{ categories: Catal
 }
 
 export async function listPublicCatalog(tenantId: string): Promise<{ categories: CatalogCategory[]; products: CatalogProduct[] }> {
-  const [categorySnapshots, productSnapshots] = await Promise.all([
-    getDocs(query(collection(db, "tenants", tenantId, "categories"), where("active", "==", true), orderBy("sortOrder"))),
-    getDocs(query(collection(db, "tenants", tenantId, "products"), where("available", "==", true))),
-  ]);
-  return {
-    categories: categorySnapshots.docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data() }) as CatalogCategory),
-    products: productSnapshots.docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data() }) as CatalogProduct),
-  };
+  const call = httpsCallable<{tenantId:string},{categories:CatalogCategory[];products:CatalogProduct[]}>(
+    functions,"getPublicCatalog",{timeout:20_000},
+  );
+  return (await call({tenantId})).data;
 }
 
 export async function saveCategory(tenantId: string, input: CatalogCategoryInput, id?: string): Promise<string> {

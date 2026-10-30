@@ -6,6 +6,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeValid } = require("./domain/delivery.cjs");
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
 const { projectPublicTracking } = require("./domain/public-tracking.cjs");
+const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
 if (!getApps().length) initializeApp();
@@ -455,6 +456,21 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
 });
 
 /** Authenticated and bounded admin catalog snapshot over HTTPS for Owner UI. */
+/** Tenant-scoped public catalogue over finite HTTPS, no WebChannel or private fields. */
+exports.getPublicCatalog = onCall({region:REGION,maxInstances:20},async(request)=>{
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const tenant=await tenantRef.get();
+  if(!tenant.exists || tenant.data().status!=="active")fail("not-found","Sorveteria indisponivel.");
+  const [categories,products]=await Promise.all([
+    tenantRef.collection("categories").where("active","==",true).limit(150).get(),
+    tenantRef.collection("products").where("available","==",true).limit(300).get(),
+  ]);
+  return projectPublicCatalog(categories.docs.map(x=>({id:x.id,data:x.data()})),
+    products.docs.map(x=>({id:x.id,data:x.data()})));
+});
+
 exports.getTenantAdminCatalog = onCall({region:REGION,maxInstances:20},async(request)=>{
   const auth=requireAuth(request);
   const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
