@@ -6,6 +6,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeValid } = require("./domain/delivery.cjs");
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
 const { projectPublicTracking } = require("./domain/public-tracking.cjs");
+const { projectAdminOrder } = require("./domain/admin-order-projection.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
@@ -804,16 +805,7 @@ exports.getTenantOperationsSnapshot = onCall({ region: REGION, maxInstances: 20 
     db.collection("memberships").where("tenantId","==",tenantId).limit(250).get(),
   ]);
   return {
-    orders: orders.docs.map((item) => {
-      const d = item.data();
-      return {
-        id:item.id, tenantId, publicCode:d.publicCode, status:d.status,
-        customer:d.customer, address:d.address || null,
-        fulfillmentMode:d.fulfillmentMode, source:d.source,
-        items:d.items, paymentMethodId:d.paymentMethodId, money:d.money,
-        estimatedMinutes:d.estimatedMinutes ?? null,
-      };
-    }),
+    orders: orders.docs.map((item) => projectAdminOrder(item.id,tenantId,item.data())),
     deliveries: deliveries.docs.map((item) => {
       const d = item.data();
       return {
