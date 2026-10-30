@@ -1,7 +1,7 @@
 const { randomBytes, timingSafeEqual } = require("node:crypto");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
-const { FieldValue, getFirestore } = require("firebase-admin/firestore");
+const { FieldValue, FieldPath, getFirestore } = require("firebase-admin/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeValid } = require("./domain/delivery.cjs");
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
@@ -458,18 +458,38 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
 
 /** Authenticated and bounded admin catalog snapshot over HTTPS for Owner UI. */
 /** Tenant-scoped public catalogue over finite HTTPS, no WebChannel or private fields. */
+function catalogCursor(request){
+  const cursor=request.data?.cursor ?? null;
+  if(cursor!==null && (typeof cursor!=="string" || !/^[A-Za-z0-9_-]{1,128}$/.test(cursor)))
+    fail("invalid-argument","Cursor do catalogo invalido.");
+  return cursor;
+}
+function catalogProductPage(collectionRef,cursor,availableOnly){
+  let q=availableOnly ? collectionRef.where("available","==",true) : collectionRef;
+  q=q.orderBy(FieldPath.documentId());
+  if(cursor)q=q.startAfter(cursor);
+  return q.limit(100).get();
+}
+function nextCatalogCursor(snapshot){
+  return snapshot.docs.length===100 ? snapshot.docs[snapshot.docs.length-1].id : null;
+}
+
 exports.getPublicCatalog = onCall({region:REGION,maxInstances:20},async(request)=>{
   const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
   if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
   const tenantRef=db.doc("tenants/"+tenantId);
   const tenant=await tenantRef.get();
   if(!tenant.exists || tenant.data().status!=="active")fail("not-found","Sorveteria indisponivel.");
+  const cursor=catalogCursor(request);
   const [categories,products]=await Promise.all([
-    tenantRef.collection("categories").where("active","==",true).limit(150).get(),
-    tenantRef.collection("products").where("available","==",true).limit(300).get(),
+    tenantRef.collection("categories").where("active","==",true).get(),
+    catalogProductPage(tenantRef.collection("products"),cursor,true),
   ]);
-  return projectPublicCatalog(categories.docs.map(x=>({id:x.id,data:x.data()})),
-    products.docs.map(x=>({id:x.id,data:x.data()})));
+  return {
+    ...projectPublicCatalog(categories.docs.map(x=>({id:x.id,data:x.data()})),
+      products.docs.map(x=>({id:x.id,data:x.data()}))),
+    nextCursor:nextCatalogCursor(products),
+  };
 });
 
 exports.getTenantAdminCatalog = onCall({region:REGION,maxInstances:20},async(request)=>{
@@ -489,11 +509,13 @@ exports.getTenantAdminCatalog = onCall({region:REGION,maxInstances:20},async(req
       ||!["tenant_owner","tenant_admin"].includes(data.role))
       fail("permission-denied","Acesso ao catalogo administrativo nao autorizado.");
   }
+  const cursor=catalogCursor(request);
   const [categories,products]=await Promise.all([
-    tenantRef.collection("categories").orderBy("sortOrder").limit(150).get(),
-    tenantRef.collection("products").limit(300).get(),
+    tenantRef.collection("categories").orderBy("sortOrder").get(),
+    catalogProductPage(tenantRef.collection("products"),cursor,false),
   ]);
   return {
+    nextCursor:nextCatalogCursor(products),
     categories:categories.docs.map(s=>{const d=s.data();return {
       id:s.id,name:d.name,active:d.active,sortOrder:d.sortOrder,
     };}),

@@ -2,19 +2,22 @@ import { httpsCallable } from "firebase/functions";
 import type { CatalogCategory, CatalogProduct } from "@/domain/catalog";
 import { catalogCategorySchema, catalogProductSchema, type CatalogCategoryInput, type CatalogProductInput } from "@/schemas/catalog";
 import { functions } from "@/lib/firebase";
+import { collectCatalogPages } from "@/domain/catalogPagination";
 
-export async function listCatalog(tenantId: string): Promise<{ categories: CatalogCategory[]; products: CatalogProduct[] }> {
-  const call = httpsCallable<{tenantId:string},{categories: CatalogCategory[];products: CatalogProduct[]}>(
-    functions, "getTenantAdminCatalog", {timeout:20_000},
+type CatalogPage = {categories:CatalogCategory[];products:CatalogProduct[];nextCursor:string|null};
+
+export async function listCatalog(tenantId: string): Promise<{categories:CatalogCategory[];products:CatalogProduct[]}> {
+  const call=httpsCallable<{tenantId:string;cursor:string|null},CatalogPage>(
+    functions,"getTenantAdminCatalog",{timeout:20_000},
   );
-  return (await call({tenantId})).data;
+  return collectCatalogPages(async cursor=>(await call({tenantId,cursor})).data);
 }
 
-export async function listPublicCatalog(tenantId: string): Promise<{ categories: CatalogCategory[]; products: CatalogProduct[] }> {
-  const call = httpsCallable<{tenantId:string},{categories:CatalogCategory[];products:CatalogProduct[]}>(
+export async function listPublicCatalog(tenantId: string): Promise<{categories:CatalogCategory[];products:CatalogProduct[]}> {
+  const call=httpsCallable<{tenantId:string;cursor:string|null},CatalogPage>(
     functions,"getPublicCatalog",{timeout:20_000},
   );
-  return (await call({tenantId})).data;
+  return collectCatalogPages(async cursor=>(await call({tenantId,cursor})).data);
 }
 
 export async function saveCategory(tenantId: string, input: CatalogCategoryInput, id?: string): Promise<string> {
