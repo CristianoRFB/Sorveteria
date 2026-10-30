@@ -60,6 +60,7 @@ describe("admin catalog snapshot permissions",()=>{
 
 describe("Owner HTTPS operations snapshot RBAC and Alpha/Beta isolation",()=>{
   it("denies unauthenticated and driver roles from operational PII",async()=>{
+    if (auth.currentUser) await signOut(auth);
     await expect(snapshot("tenant-alpha")).rejects.toMatchObject({code:"functions/unauthenticated"});
     await login("driver.alpha@demo.sorveteria.test");
     await expect(snapshot("tenant-alpha")).rejects.toMatchObject({code:"functions/permission-denied"});
