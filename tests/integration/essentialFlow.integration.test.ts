@@ -214,9 +214,22 @@ describe("fluxo essencial em dois tenants", () => {
 
     await signIn("driver.alpha@demo.sorveteria.test");
     await action({ tenantId: "tenant-alpha", deliveryId: orderId, action: "deliver", deliveryCode: resetResult.data.deliveryCode });
+    // Drivers are only allowed to read their scoped HTTPS delivery projection.
+    // Raw order and delivery documents may contain private confirmation hashes.
+    await expect(getDoc(orderRef)).rejects.toMatchObject({ code: "permission-denied" });
+    await expect(getDoc(doc(db, "tenants/tenant-alpha/deliveries", orderId)))
+      .rejects.toMatchObject({ code: "permission-denied" });
+    const driverSnapshot = await callable<{ tenantId: string }, { deliveries: Array<{
+      orderId: string; tenantId: string; driverId: string; status: string;
+    }> }>("getDriverAssignments")({ tenantId: "tenant-alpha" });
+    expect(driverSnapshot.data.deliveries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ orderId, tenantId: "tenant-alpha", driverId: "driver-alpha", status: "delivered" }),
+    ]));
+    expect(JSON.stringify(driverSnapshot.data)).not.toMatch(/deliveryCodeHash|privateDeliveryCodes|confirmationCode/);
+    await expect(action({ tenantId: "tenant-alpha", deliveryId: orderId, action: "deliver", deliveryCode: resetResult.data.deliveryCode })).rejects.toMatchObject({ code: "functions/failed-precondition" });
+    await signIn("owner.alpha@demo.sorveteria.test");
     const deliveredOrder = await getDoc(orderRef);
     expect(deliveredOrder.data()?.status).toBe("delivered");
-    await expect(action({ tenantId: "tenant-alpha", deliveryId: orderId, action: "deliver", deliveryCode: resetResult.data.deliveryCode })).rejects.toMatchObject({ code: "functions/failed-precondition" });
     const deliveredTracking = await getDoc(trackingRef);
     expect(deliveredTracking.data()?.status).toBe("delivered");
     expect(deliveredTracking.data()).not.toHaveProperty("customer");
