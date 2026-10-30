@@ -79,3 +79,9 @@ Uma jornada completa no navegador deve ser repetida e ter evidências reais ante
 ## Evidência nova de tracking e QA
 
 O tracking público usa callable HTTP com projeção allowlist em vez de leituras Firestore WebChannel no navegador; o modo de conexão long polling foi habilitado **somente para Emulator Suite**. A primeira jornada completa do workflow de QA (run `40976263175`) passou e gerou 22 capturas novas com dados sintéticos. A CI `40976263189` aprovou 90 testes unitários, 11 Rules, 5 integrações e audits. Uma única jornada aprovada não encerra o histórico de intermitência: exigir repetições e, no staging autorizado, comparar navegação móvel, autenticação e tracking no ambiente real.
+ 
+## Gate local de estabilidade após repetição
+
+Em 29/10/2026 (horário UTC da execução), o workflow [40991724310](https://github.com/CristianoRFB/Sorveteria/actions/runs/40991724310) aprovou **3 jornadas consecutivas** do navegador com 22 screenshots novas por rodada, totalizando **66** em ambiente **exclusivamente sintético**. O run [40991724298](https://github.com/CristianoRFB/Sorveteria/actions/runs/40991724298) aprovou 101 unitários, 11 Rules e 20 integrações.
+
+Este gate prova apenas a estabilidade local/emulada dentro do escopo desses testes. Para marcar F4 ou F5 como liberadas, executar o mesmo fluxo no staging **real autorizado**, registrar métricas, dispositivos e evidências verificáveis de permissão Alpha/Beta, backup/restauração e rollback. Nunca transformar esse resultado local em declaração automática de prontidão pública.

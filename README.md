@@ -40,7 +40,7 @@ npm run dev:emulator
 
 - Toda operação sensível valida tenant, membro, papel e plano no backend/Rules. Dados Alpha e Beta devem permanecer isolados.
 - O checkout usa uma tentativa UUID idempotente, reconhecida em transação Firestore. Repetir uma tentativa não cria outro pedido nem reexpõe o código privado de entrega.
-- Tracking tem prazo máximo para leitura e refresh com pausa em abas ocultas, finalização em estados terminais e backoff de falhas. **A causa dos timeouts intermitentes de navegador ainda requer diagnóstico E2E repetido.**
+- Tracking tem prazo máximo para leitura e refresh com pausa em abas ocultas, finalização em estados terminais e backoff de falhas. **A jornada E2E local foi aprovada três vezes consecutivas no Emulator Suite; staging hospedado ainda não foi validado.**
 - Planos, períodos de avaliação, limites, overrides e atribuição manual estão implementados. Billing automático **não** está aprovado nem implementado.
 - `.env.example` é apenas um modelo de campos públicos; arquivos `.env.*` reais, service accounts e certificados privados jamais devem ser versionados.
 - Builds hospedados com projeto `demo-*`, placeholders Firebase ou `VITE_USE_EMULATORS=true` são rejeitados no startup.
@@ -55,6 +55,6 @@ Ele valida metadados, SHA, configuração Firebase e bloqueios. **Não executa d
 
 ## Evidências e próximas etapas
 
-Há CI com testes automatizados e Emulator Suite para checkout concorrente, regras e tracking repetido. Os resultados recentes e SHAs estão no [registro do GOAL MASTER](docs/GOAL_MASTER_EXECUTION.md). Ainda faltam diagnóstico/repetição de E2E real no navegador, staging autorizado, testes em ambiente externo, homologação piloto e preflight final de produção.
+Há CI com testes automatizados e Emulator Suite para checkout concorrente, regras e tracking repetido. Os resultados recentes e SHAs estão no [registro do GOAL MASTER](docs/GOAL_MASTER_EXECUTION.md). As três repetições de E2E no navegador local passaram com 66 screenshots reais de fixtures sintéticas. Ainda faltam staging autorizado, testes hospedados/dispositivos reais, homologação piloto e preflight final de produção.
 
 **Nunca** interpretar a CI verde ou screenshots da v06 como aprovação de deploy público; nenhuma migração de dados reais nem deploy público foi autorizado.

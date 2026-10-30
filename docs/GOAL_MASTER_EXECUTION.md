@@ -119,3 +119,14 @@ Os registros de F0 acima são históricos. Para continuidade, prevalece o estado
 - **Readiness estimado:** `GENERAL_READINESS_ESTIMATE=84_PERCENT`, apenas uma estimativa de avanço geral do GOAL MASTER. Não é autorização de deploy nem evidência de produção.
 - **Próximo gate:** verificar resultado das três jornadas; se houver falha, corrigir a partir de logs/artefatos sanitizados. Para F3-F5, exigir projeto/conta Firebase real, autorização de custo, IAM/secrets, staging isolado, backup/restauração e aprovação separada de produção/migração.
 
+## Gate F2 consolidado — três jornadas completas / commit `b9e8fa6b`
+
+- **Código verificado:** `b9e8fa6bf7632add1270d168e117160896b48d61` na branch do GOAL MASTER.
+- **E2E navegador:** [GitHub Actions run 40991724310](https://github.com/CristianoRFB/Sorveteria/actions/runs/40991724310) finalizado com **success**, três execuções completas, cada qual em sessão isolada do Chrome, **22 screenshots novas por execução = 66 capturas reais** no Emulator Suite. Artefato: [sorv-browser-qa-40991724310](https://github.com/CristianoRFB/Sorveteria/actions/runs/40991724310/artifacts/12949478037). Cada execução percorreu checkout, tracking, Owner, catálogo, Driver, entrega concluída, negação Alpha×Beta e Platform Owner; sem clientes reais.
+- **CI código:** [run 40991724298](https://github.com/CristianoRFB/Sorveteria/actions/runs/40991724298), **success**: **101/101** testes unitários, **11/11** Rules e **20/20** integrações; lint, build, diagramas e manifestos aprovados; `npm audit --omit=dev --audit-level=high` e equivalente Functions com **0 vulnerabilidades**. O preflight de produção segue **BLOCKED** intencionalmente por falta de autorização e evidências externas.
+- **Consertos desta sequência:** projeção allowlist de dados aninhados nos pedidos administrativos, rejeição de chaves de protótipo em seleções, gatilho obrigatório de QA ao alterar a tela Driver e checagem de limpeza de sessão pelo Firebase Auth em vez de abrir IndexedDB durante a remoção de armazenamento.
+- **F2 no Emulator Suite:** `LOCAL_BROWSER_STABILITY=PASS_THREE_CONSECUTIVE_RUNS`. Isso **não** comprova confiabilidade no Firebase hospedado ou em dispositivos reais. Não tratar F3/F4/F5 como concluídas.
+- **Readiness global estimado:** `GENERAL_READINESS_ESTIMATE=86_PERCENT` — estimativa operacional, **não** autorização de produção.
+- **Bloqueios externos inalterados:** projeto e credenciais de staging realmente autorizados, custos, IAM, secrets, backup/restauração comprovados, testes hospedados, piloto real quando houver, domínio e revisão dos alertas/rollback. Produção e qualquer migração de dados reais exigem autorização específica independente.
+
+**NEXT_ACTION:** prosseguir de `b9e8fa6b`, confirmar se a branch mudou e só repetir gates afetados; preparar documentação e infraestrutura de staging sem execução cloud até autorização. Preservar `main`, v05 comercial e v06 histórica.
