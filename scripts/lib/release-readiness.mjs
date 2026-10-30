@@ -24,7 +24,9 @@ function isPublicDomain(v) {
   const labels = v.toLowerCase().split(".");
   if (labels.length < 2 || labels.some(part => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part))) return false;
   const suffix = labels.at(-1);
+  const domain = labels.join(".");
   return !["local","localhost","test","invalid","example"].includes(suffix)
+    && !["example.com","example.org","example.net"].includes(domain)
     && !/^(?:127|10|192|172)$/.test(labels[0]);
 }
 function isReference(value) {
@@ -45,6 +47,8 @@ export function assessReleasePlan(meta = {}, context = {}) {
   gate("domain", isPublicDomain(meta?.domain), "Domínio externo inválido; não use localhost, IP, URLs ou domínios fictícios.");
   gate("source-sha", SHA.test(meta?.sourceSha ?? "") && meta.sourceSha === context.headSha,
     "sourceSha deve ser o HEAD completo e exato do checkout verificado.");
+  gate("source-clean", context.worktreeClean === true,
+    "O checkout deve estar limpo (sem alterações ou arquivos novos não versionados) antes da revisão de release.");
   gate("repo-files", RELEASE_FILES.every(path => context.files?.includes(path)), "Arquivos obrigatórios do Firebase, Rules, Functions e CI ausentes.");
   const config = context.firebaseConfig;
   gate("firebase-config", Boolean(config && config.functions?.runtime === "nodejs22"

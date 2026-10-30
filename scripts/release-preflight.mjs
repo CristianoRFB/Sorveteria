@@ -34,11 +34,14 @@ if (has("--help")) {
   try { firebaseConfig = JSON.parse(await readFile(join(root, "firebase.json"), "utf8")); } catch { /* reported below */ }
   let headSha = null;
   let trackedPaths = [];
+  let worktreeClean = false;
   try {
     headSha = execFileSync("git", ["rev-parse", "HEAD"], {cwd:root,encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim();
     trackedPaths = execFileSync("git", ["ls-files", "-z"], {cwd:root,encoding:"utf8",stdio:["ignore","pipe","ignore"]}).split("\0").filter(Boolean);
+    worktreeClean = execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"],
+      {cwd:root,encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim().length === 0;
   } catch { /* not a Git checkout: the SHA gate fails closed */ }
-  const result = assessReleasePlan(meta,{files,firebaseConfig,headSha,trackedPaths});
+  const result = assessReleasePlan(meta,{files,firebaseConfig,headSha,trackedPaths,worktreeClean});
   if (has("--json")) console.log(JSON.stringify(result,null,2));
   else {
     console.log("RELEASE PREFLIGHT: "+result.decision+" ("+result.environment+")");

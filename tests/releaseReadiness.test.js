@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assessReleasePlan, RELEASE_FILES } from "../scripts/lib/release-readiness.mjs";
 const headSha = "a".repeat(40);
 const firebaseConfig = {functions:{runtime:"nodejs22",source:"functions"},firestore:{rules:"firestore.rules",indexes:"firestore.indexes.json"},storage:{rules:"storage.rules"}};
-const context = {headSha,files:RELEASE_FILES,firebaseConfig,trackedPaths:["src/main.tsx","firebase.json"]};
+const context = {headSha,files:RELEASE_FILES,firebaseConfig,trackedPaths:["src/main.tsx","firebase.json"],worktreeClean:true};
 const staging = {
   environment:"staging",projectId:"sorveteria-staging-77",domain:"staging.sorveteria.com.br",
   sourceSha:headSha,approvalRef:"change/2026-10-29-staging",accessRef:"review/access-2026-10",
@@ -21,6 +21,18 @@ describe("offline release preflight is fail-closed and never authorizes deployme
     expect(report.decision).toBe("BLOCKED");
     expect(report.blockers).toContain("environment");
     expect(report.blockers).toContain("project-id");
+  });
+  it("blocks modified or untracked source even when the manifest SHA matches HEAD",()=>{
+    const dirty=assessReleasePlan(staging,{...context,worktreeClean:false});
+    expect(dirty.blockers).toContain("source-clean");
+    const unknown=assessReleasePlan(staging,{...context,worktreeClean:undefined});
+    expect(unknown.blockers).toContain("source-clean");
+    expect(assessReleasePlan(staging,context).blockers).not.toContain("source-clean");
+  });
+  it("rejects reserved sample domains before external review",()=>{
+    for(const domain of ["example.com","example.org","example.net"]){
+      expect(assessReleasePlan({...staging,domain},context).blockers).toContain("domain");
+    }
   });
   it("rejects demo Firebase, localhost, fake domains and mismatched SHA",()=>{
     const report=assessReleasePlan({...staging,projectId:"demo-sorveteria",domain:"localhost",sourceSha:"f".repeat(40)},context);

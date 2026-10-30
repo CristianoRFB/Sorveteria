@@ -2,6 +2,8 @@
 
 **Status:** preparação de F3 e F5, somente leitura. Nenhum ambiente cloud foi provisionado nem homologado por este documento.
 
+> **Integridade do checkout (30/10/2026):** o preflight exige `git status --porcelain --untracked-files=normal` vazio, além do SHA exato; alterações locais e arquivos novos não versionados bloqueiam a revisão. Domínios reservados `example.com`, `.org` e `.net` não são evidências de destino real. Esses gates continuam **somente leitura** e não autorizam deploy.
+
 ## Escopo e autorização
 
 O script `npm run release:preflight` realiza validação **offline** de metadados, SHA, caminhos de Rules, versão Functions Node 22, arquivo de índices e arquivos sensíveis rastreados no Git. Ele **não** autentica contra contas, não confirma permissões reais, não cria Secrets, não faz deploy, não publica frontend e não migra dados. Uma referência fornecida no manifesto **não comprova** que o procedimento real ocorreu.
