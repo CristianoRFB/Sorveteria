@@ -32,6 +32,32 @@ async function login(email:string) {
   if(auth.currentUser)await signOut(auth);
   await signInWithEmailAndPassword(auth,email,secret);
 }
+type CatalogSnapshot = {categories:Array<{id:string;name:string}>;products:Array<{id:string;name:string;categoryId:string}>};
+const catalog = (tenantId:string) =>
+  httpsCallable<{tenantId:string},CatalogSnapshot>(functions,"getTenantAdminCatalog")({tenantId});
+describe("admin catalog snapshot permissions",()=>{
+  it("denies unauthenticated users, drivers and cross-tenant Owners",async()=>{
+    if(auth.currentUser)await signOut(auth);
+    await expect(catalog("tenant-alpha")).rejects.toMatchObject({code:"functions/unauthenticated"});
+    await login("driver.alpha@demo.sorveteria.test");
+    await expect(catalog("tenant-alpha")).rejects.toMatchObject({code:"functions/permission-denied"});
+    await login("owner.beta@demo.sorveteria.test");
+    await expect(catalog("tenant-alpha")).rejects.toMatchObject({code:"functions/permission-denied"});
+  });
+  it("returns Alpha categories and products to authorized Owner without leaking private tenant data",async()=>{
+    await login("owner.alpha@demo.sorveteria.test");
+    const data=(await catalog("tenant-alpha")).data;
+    expect(data.products.map(x=>x.id)).toContain("pot-classic");
+    expect(data.categories.map(x=>x.id)).toContain("gelatos");
+    expect(JSON.stringify(data)).not.toMatch(/deliveryCodeHash|privateDeliveryCodes|customerId|paymentMethodId/);
+  });
+  it("rejects tenant path traversal and permits scoped Platform Owner context",async()=>{
+    await login("platform@demo.sorveteria.test");
+    await expect(catalog("../tenant-beta")).rejects.toMatchObject({code:"functions/invalid-argument"});
+    expect((await catalog("tenant-beta")).data.products.length).toBeGreaterThan(0);
+  });
+});
+
 describe("Owner HTTPS operations snapshot RBAC and Alpha/Beta isolation",()=>{
   it("denies unauthenticated and driver roles from operational PII",async()=>{
     await expect(snapshot("tenant-alpha")).rejects.toMatchObject({code:"functions/unauthenticated"});
