@@ -7,6 +7,7 @@ const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeVa
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
 const { projectPublicTracking } = require("./domain/public-tracking.cjs");
 const { projectAdminOrder } = require("./domain/admin-order-projection.cjs");
+const { projectDriverAssignment } = require("./domain/driver-assignment-projection.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
@@ -823,23 +824,12 @@ exports.getDriverAssignments = onCall({region:REGION,maxInstances:20},async(requ
   const assignments=await tenantRef.collection("deliveries").where("driverId","==",auth.uid)
     .orderBy("updatedAt","desc").limit(50).get();
   const rows=await Promise.all(assignments.docs.map(async(d)=>{
-    const delivery=d.data(),orderId=delivery.orderId;
+    const delivery=d.data();
+    const orderId=delivery.orderId;
     if(typeof orderId!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(orderId))return null;
     const orderSnapshot=await tenantRef.collection("orders").doc(orderId).get();
-    const order=orderSnapshot.exists?orderSnapshot.data():null;
-    const address=order?.address;
-    const customer=order?.customer;
-    return {
-      id:d.id,tenantId,orderId,driverId:auth.uid,
-      status:delivery.status,failedAttempts:delivery.failedAttempts||0,
-      confirmationFailures:delivery.confirmationFailures||0,
-      ...(order&&typeof order.publicCode==="string"?{publicCode:order.publicCode}:{}),
-      ...(address?{address:{
-        street:address.street,number:address.number,neighborhood:address.neighborhood,
-        ...(typeof address.reference==="string"?{reference:address.reference}:{}),
-      }}:{}),
-      ...(customer?{customer:{name:customer.name,phone:customer.phone}}:{}),
-    };
+    return projectDriverAssignment(d.id,tenantId,auth.uid,delivery,
+      orderSnapshot.exists ? orderSnapshot.data() : null);
   }));
   return {deliveries:rows.filter(Boolean)};
 });
