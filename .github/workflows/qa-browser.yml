@@ -9,6 +9,7 @@ on:
       - 'src/pages/TenantTrackingPage.tsx'
       - 'src/services/orderService.ts'
       - 'src/services/tenantOperations.ts'
+      - 'src/services/catalogService.ts'
       - 'src/pages/TenantAdminPage.tsx'
       - 'functions/index.js'
       - 'src/lib/firebase.ts'

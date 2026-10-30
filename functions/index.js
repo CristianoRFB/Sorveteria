@@ -454,6 +454,40 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
   return { success: true };
 });
 
+/** Authenticated and bounded admin catalog snapshot over HTTPS for Owner UI. */
+exports.getTenantAdminCatalog = onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))
+    fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenant,membership]=await Promise.all([
+    tenantRef.get(),
+    auth.token.platform_owner===true ? Promise.resolve(null) : db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const data=membership?.exists?membership.data():null;
+    if(!data||data.userId!==auth.uid||data.tenantId!==tenantId||data.status!=="active"
+      ||!["tenant_owner","tenant_admin"].includes(data.role))
+      fail("permission-denied","Acesso ao catalogo administrativo nao autorizado.");
+  }
+  const [categories,products]=await Promise.all([
+    tenantRef.collection("categories").orderBy("sortOrder").limit(150).get(),
+    tenantRef.collection("products").limit(300).get(),
+  ]);
+  return {
+    categories:categories.docs.map(s=>{const d=s.data();return {
+      id:s.id,name:d.name,active:d.active,sortOrder:d.sortOrder,
+    };}),
+    products:products.docs.map(s=>{const d=s.data();return {
+      id:s.id,name:d.name,description:d.description||"",categoryId:d.categoryId,
+      kind:d.kind,priceCents:d.priceCents,available:d.available,
+      optionGroups:d.optionGroups||[],imageUrl:d.imageUrl||null,
+    };}),
+  };
+});
+
 exports.saveCatalogCategory = onCall({ region: REGION }, async (request) => {
   const auth = requireAuth(request);
   const tenantId = requireText(request.data?.tenantId, "Sorveteria", 128);
