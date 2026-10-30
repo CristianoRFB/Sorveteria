@@ -8,6 +8,7 @@ const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require(
 const { projectPublicTracking } = require("./domain/public-tracking.cjs");
 const { projectAdminOrder } = require("./domain/admin-order-projection.cjs");
 const { projectDriverAssignment } = require("./domain/driver-assignment-projection.cjs");
+const { isActiveTenantMembership } = require("./domain/membership.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
@@ -35,7 +36,7 @@ async function readActiveMembership(transaction, tenantId, uid) {
   const membershipRef = db.doc(`memberships/${tenantId}_${uid}`);
   const snapshot = await transaction.get(membershipRef);
   const membership = snapshot.exists ? snapshot.data() : null;
-  if (!membership || membership.status !== "active") fail("permission-denied", "Vínculo ativo com a sorveteria não encontrado.");
+  if (!isActiveTenantMembership(membership, tenantId, uid)) fail("permission-denied", "Vínculo ativo com a sorveteria não encontrado.");
   return { ref: membershipRef, data: membership };
 }
 
@@ -608,6 +609,8 @@ exports.addTenantMember = onCall({ region: REGION }, async (request) => {
     if (role === "tenant_admin" && manager?.data.role !== "tenant_owner" && auth.token.platform_owner !== true) {
       fail("permission-denied", "Somente o responsável pode atribuir perfil de administrador.");
     }
+    if (previous.exists && (previous.data().tenantId !== tenantId || previous.data().userId !== user.uid))
+      fail("failed-precondition", "Vínculo inconsistente para esta sorveteria.");
     if (previous.exists && previous.data().role === "tenant_owner") fail("failed-precondition", "A conta responsável não pode ser substituída por esta ação.");
     const membership = {
       tenantId, userId: user.uid, email: user.email || email, displayName: user.displayName || "",
@@ -640,6 +643,8 @@ exports.setTenantMemberStatus = onCall({ region: REGION }, async (request) => {
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
     const manager = await requireTenantManager(transaction, tenantId, auth);
     if (!memberSnapshot.exists) fail("not-found", "Membro não encontrado.");
+    if (memberSnapshot.data().tenantId !== tenantId || memberSnapshot.data().userId !== userId)
+      fail("failed-precondition", "Vínculo inconsistente para esta sorveteria.");
     if (memberSnapshot.data().role === "tenant_owner") fail("failed-precondition", "A conta responsável não pode ser desativada por esta ação.");
     requireCommercialFeature(tenantSnapshot.data(), "team_management");
     await updateMembershipCapacity(transaction, tenantId, tenantSnapshot.data(), memberSnapshot.data(), { ...memberSnapshot.data(), status });
@@ -938,7 +943,8 @@ exports.assignDelivery = onCall({ region: REGION }, async (request) => {
     const order = orderSnapshot.data();
     const isReassignment = order.status === "out_for_delivery" && deliverySnapshot.exists && deliverySnapshot.data().status === "failed";
     if (order.fulfillmentMode !== "delivery" || (order.status !== "ready" && !isReassignment)) fail("failed-precondition", "Pedido não está pronto para atribuição.");
-    if (!driverSnapshot.exists || driverSnapshot.data().role !== "driver" || driverSnapshot.data().status !== "active") fail("failed-precondition", "Entregador não pertence a esta sorveteria.");
+    if (!driverSnapshot.exists || !isActiveTenantMembership(driverSnapshot.data(),tenantId,driverId)
+      || driverSnapshot.data().role !== "driver") fail("failed-precondition", "Entregador não pertence a esta sorveteria.");
     if (deliverySnapshot.exists && !isReassignment) fail("already-exists", "Já existe entrega para este pedido.");
     const codeHash = deliverySnapshot.exists ? deliverySnapshot.data().deliveryCodeHash : privateCodeSnapshot.data()?.hash;
     if (!codeHash) fail("failed-precondition", "Código de confirmação indisponível.");
@@ -982,7 +988,8 @@ exports.driverDeliveryAction = onCall({ region: REGION }, async (request) => {
     const membershipRef = db.doc(`memberships/${tenantId}_${auth.uid}`);
     const membershipSnapshot = await transaction.get(membershipRef);
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
-    if (!membershipSnapshot.exists || membershipSnapshot.data().role !== "driver" || membershipSnapshot.data().status !== "active") fail("permission-denied", "Entregador sem vínculo ativo.");
+    if (!membershipSnapshot.exists || !isActiveTenantMembership(membershipSnapshot.data(),tenantId,auth.uid)
+      || membershipSnapshot.data().role !== "driver") fail("permission-denied", "Entregador sem vínculo ativo.");
     requireCommercialFeature(tenantSnapshot.data(), "simple_delivery");
     if (action === "deliver") requireCommercialFeature(tenantSnapshot.data(), "delivery_confirmation");
     if (!deliverySnapshot.exists || !orderSnapshot.exists) fail("not-found", "Entrega não encontrada.");

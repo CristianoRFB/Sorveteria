@@ -11,6 +11,7 @@ import { isTerminalTrackingStatus, trackingRefreshDelayMs } from "@/domain/track
 const labels: Record<string, string> = {
   received: "Pedido recebido", confirmed: "Pedido confirmado", preparing: "Em preparo", ready: "Pedido pronto",
   awaiting_driver: "Aguardando entregador", out_for_delivery: "Saiu para entrega", arrived: "Entregador chegou",
+  delivery_attempt_failed: "Tentativa de entrega sem sucesso",
   ready_for_pickup: "Pronto para retirada", delivered: "Entregue", picked_up: "Retirado", cancelled: "Cancelado",
 };
 
