@@ -11,6 +11,7 @@ on:
       - 'src/services/tenantOperations.ts'
       - 'src/services/catalogService.ts'
       - 'src/pages/TenantAdminPage.tsx'
+      - 'src/pages/DriverPage.tsx'
       - 'functions/index.js'
       - 'src/lib/firebase.ts'
       - 'src/domain/firestoreTransport.ts'
