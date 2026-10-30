@@ -784,6 +784,44 @@ exports.getPublicOrderTracking = onCall({region:REGION,maxInstances:20}, async (
  * HTTPS callable returns bounded, explicitly projected operational fields.
  * No privateDeliveryCodes, password reset tokens, or platform-global reads.
  */
+/** Assigned-only delivery list; authentication and driver membership are validated server-side. */
+exports.getDriverAssignments = onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenant,membership]=await Promise.all([
+    tenantRef.get(),db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenant.exists || tenant.data().status!=="active")fail("not-found","Sorveteria indisponivel.");
+  const member=membership.exists?membership.data():null;
+  if(!member||member.tenantId!==tenantId||member.userId!==auth.uid
+    ||member.status!=="active"||member.role!=="driver")
+    fail("permission-denied","Acesso de entregador nao autorizado.");
+  const assignments=await tenantRef.collection("deliveries").where("driverId","==",auth.uid)
+    .orderBy("updatedAt","desc").limit(50).get();
+  const rows=await Promise.all(assignments.docs.map(async(d)=>{
+    const delivery=d.data(),orderId=delivery.orderId;
+    if(typeof orderId!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(orderId))return null;
+    const orderSnapshot=await tenantRef.collection("orders").doc(orderId).get();
+    const order=orderSnapshot.exists?orderSnapshot.data():null;
+    const address=order?.address;
+    const customer=order?.customer;
+    return {
+      id:d.id,tenantId,orderId,driverId:auth.uid,
+      status:delivery.status,failedAttempts:delivery.failedAttempts||0,
+      confirmationFailures:delivery.confirmationFailures||0,
+      ...(order&&typeof order.publicCode==="string"?{publicCode:order.publicCode}:{}),
+      ...(address?{address:{
+        street:address.street,number:address.number,neighborhood:address.neighborhood,
+        ...(typeof address.reference==="string"?{reference:address.reference}:{}),
+      }}:{}),
+      ...(customer?{customer:{name:customer.name,phone:customer.phone}}:{}),
+    };
+  }));
+  return {deliveries:rows.filter(Boolean)};
+});
+
 exports.getTenantOperationsSnapshot = onCall({ region: REGION, maxInstances: 20 }, async (request) => {
   const auth = requireAuth(request);
   const tenantId = requireText(request.data?.tenantId, "Sorveteria", 128);

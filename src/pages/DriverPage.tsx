@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenant } from "@/hooks/useTenant";
 import type { DriverDelivery } from "@/services/tenantOperations";
-import { loadOrderForDriver, watchDriverDeliveries } from "@/services/tenantOperations";
+import { watchDriverDeliveries } from "@/services/tenantOperations";
 import { driverDeliveryAction } from "@/services/orderService";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -63,13 +63,9 @@ function DeliveryCard({ delivery, tenantId, busy, code, setCode, act }: {
   setCode: (value: string) => void;
   act: (delivery: DriverDelivery, action: "start" | "arrive" | "deliver" | "failed") => Promise<void>;
 }) {
-  const [details, setDetails] = useState<Pick<DriverDelivery, "address" | "customer" | "publicCode"> | null>(null);
-  useEffect(() => {
-    let active = true;
-    loadOrderForDriver(tenantId, delivery.orderId).then((value) => { if (active) setDetails(value); }).catch(() => { if (active) setDetails(null); });
-    return () => { active = false; };
-  }, [tenantId, delivery.orderId]);
-  const address = details?.address;
+  // The HTTPS assignment snapshot includes only this driver's assigned order details.
+  const details = delivery;
+  const address = details.address;
   const mapQuery = address ? [address.street, address.number, address.neighborhood].filter(Boolean).join(", ") : "";
   return <article className="driver-card">
     <header className="order-card-heading"><div><span className="eyebrow">{details?.publicCode || "Entrega"}</span><h2>{details?.customer?.name || "Carregando pedido..."}</h2></div><span className={`status-pill status-${delivery.status}`}>{labels[delivery.status] || delivery.status}</span></header>

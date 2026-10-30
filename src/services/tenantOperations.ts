@@ -116,12 +116,35 @@ export function watchDrivers(tenantId: string, onRows: (drivers: Membership[]) =
   );
 }
 
-export function watchDriverDeliveries(tenantId: string, driverId: string, onRows: (deliveries: DriverDelivery[]) => void, onError: (error: Error) => void): Unsubscribe {
-  return onSnapshot(
-    query(collection(db, "tenants", tenantId, "deliveries"), where("driverId", "==", driverId), orderBy("updatedAt", "desc"), limit(50)),
-    (snapshot) => onRows(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as DriverDelivery)),
-    (error) => onError(error),
-  );
+export function watchDriverDeliveries(tenantId: string, _driverId: string, onRows: (deliveries: DriverDelivery[]) => void, onError: (error: Error) => void): Unsubscribe {
+  // Server always derives the driver identity from Firebase Auth, never the caller.
+  const call = httpsCallable<{tenantId:string},{deliveries:DriverDelivery[]}>(functions,"getDriverAssignments",{timeout:20_000});
+  let active = true;
+  let inFlight = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let failures = 0;
+  const clear = () => { if(timer!==undefined)clearTimeout(timer);timer=undefined; };
+  const refresh = async () => {
+    if(!active || inFlight || document.visibilityState==="hidden")return;
+    inFlight = true;
+    try {
+      const result=await call({tenantId});
+      if(active){failures=0;onRows(result.data.deliveries);}
+    } catch(e) {
+      if(active){failures++;onError(e instanceof Error?e:new Error("Falha ao consultar entregas."));}
+    } finally {
+      inFlight=false;
+      if(active){clear();timer=setTimeout(()=>void refresh(),Math.min(60_000,30_000*2**Math.min(1,failures)));}
+    }
+  };
+  const visibility=()=>{
+    if(!active)return;
+    if(document.visibilityState==="visible"){clear();void refresh();}
+    else clear();
+  };
+  document.addEventListener("visibilitychange",visibility);
+  void refresh();
+  return ()=>{active=false;clear();document.removeEventListener("visibilitychange",visibility);};
 }
 
 export async function loadOrderForDriver(tenantId: string, orderId: string): Promise<Pick<DriverDelivery, "address" | "customer" | "publicCode"> | null> {
