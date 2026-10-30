@@ -1,7 +1,5 @@
 import {
   collection,
-  doc,
-  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -145,13 +143,6 @@ export function watchDriverDeliveries(tenantId: string, _driverId: string, onRow
   document.addEventListener("visibilitychange",visibility);
   void refresh();
   return ()=>{active=false;clear();document.removeEventListener("visibilitychange",visibility);};
-}
-
-export async function loadOrderForDriver(tenantId: string, orderId: string): Promise<Pick<DriverDelivery, "address" | "customer" | "publicCode"> | null> {
-  const snapshot = await getDoc(doc(db, "tenants", tenantId, "orders", orderId));
-  if (!snapshot.exists()) return null;
-  const order = snapshot.data();
-  return { address: order.address, customer: order.customer, publicCode: order.publicCode };
 }
 
 export async function platformCreateTenant(input: { displayName: string; slug: string; ownerEmail?: string }) {

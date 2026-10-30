@@ -39,12 +39,6 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/tenants/$(tenantId))
         && get(/databases/$(database)/documents/tenants/$(tenantId)).data.status == "active";
     }
-    function assignedDriver(tenantId, orderId) {
-      let deliveryPath = /databases/$(database)/documents/tenants/$(tenantId)/deliveries/$(orderId);
-      return tenantDriver(tenantId) && exists(deliveryPath)
-        && get(deliveryPath).data.driverId == request.auth.uid;
-    }
-
     match /users/{uid} {
       allow get: if signedIn() && request.auth.uid == uid || platformOwner();
       allow list: if platformOwner();
@@ -89,9 +83,9 @@ service cloud.firestore {
       }
 
       match /orders/{orderId} {
+        // Drivers use getDriverAssignments HTTPS instead of raw order PII.
         allow get: if platformOwner() || tenantStaff(tenantId)
-          || (signedIn() && resource.data.customerId == request.auth.uid)
-          || assignedDriver(tenantId, orderId);
+          || (signedIn() && resource.data.customerId == request.auth.uid);
         allow list: if platformOwner() || tenantStaff(tenantId)
           || (signedIn() && resource.data.customerId == request.auth.uid);
         // Clientes nunca escrevem totais, estados operacionais nem códigos confiáveis.
@@ -106,8 +100,9 @@ service cloud.firestore {
       }
 
       match /deliveries/{deliveryId} {
-        allow get, list: if platformOwner() || tenantStaff(tenantId)
-          || (tenantDriver(tenantId) && resource.data.driverId == request.auth.uid);
+        // Raw records include confirmation hashes: never expose them to drivers.
+        // Driver UI reads only its backend-projected assignments via HTTPS callable.
+        allow get, list: if platformOwner() || tenantStaff(tenantId);
         allow create, update, delete: if false;
       }
 

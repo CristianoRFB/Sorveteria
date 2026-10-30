@@ -109,10 +109,14 @@ describe("Firestore Rules — tenant isolation", () => {
     await assertFails(getDoc(doc(db, "tenants/tenant-alpha/privateDeliveryCodes/order-alpha")));
   });
 
-  it("driver vê somente entrega atribuída e não muda o driverId nem o estado diretamente", async () => {
+  it("entregador não lê documentos brutos de pedidos e entregas nem códigos de confirmação", async () => {
     const db = signed("driver-alpha");
-    await assertSucceeds(getDoc(doc(db, "tenants/tenant-alpha/deliveries/order-alpha")));
-    await assertSucceeds(getDoc(doc(db, "tenants/tenant-alpha/orders/order-alpha")));
+    // getDriverAssignments is the only authorized, scoped source of assignment details.
+    await assertFails(getDoc(doc(db, "tenants/tenant-alpha/deliveries/order-alpha")));
+    await assertFails(getDocs(collection(db, "tenants/tenant-alpha/deliveries")));
+    await assertFails(getDoc(doc(db, "tenants/tenant-alpha/orders/order-alpha")));
+    await assertFails(getDocs(collection(db, "tenants/tenant-alpha/orders")));
+    await assertFails(getDoc(doc(db, "tenants/tenant-alpha/privateDeliveryCodes/order-alpha")));
     await assertFails(getDoc(doc(db, "tenants/tenant-beta/deliveries/order-beta")));
     await assertFails(updateDoc(doc(db, "tenants/tenant-alpha/deliveries/order-alpha"), { driverId: "driver-beta", status: "delivered" }));
   });
