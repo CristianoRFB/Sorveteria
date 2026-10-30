@@ -14,6 +14,14 @@ const labels: Record<string, string> = {
 export function DriverPage() {
   const { tenant } = useTenant();
   const { user } = useAuth();
+  if (!tenant || !user) return <LoadingState label="Carregando sorveteria e sessão..." />;
+  // Changing tenant or Firebase identity must reset deliveries and confirmation codes.
+  return <DriverPageBody key={tenant.id + ":" + user.uid} tenant={tenant} userId={user.uid} />;
+}
+function DriverPageBody({ tenant, userId }: {
+  tenant: NonNullable<ReturnType<typeof useTenant>["tenant"]>;
+  userId: string;
+}) {
   const [rows, setRows] = useState<DriverDelivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,13 +30,12 @@ export function DriverPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!tenant || !user) return;
-    return watchDriverDeliveries(tenant.id, user.uid, (deliveries) => {
+    return watchDriverDeliveries(tenant.id, userId, (deliveries) => {
       setRows(deliveries);
       setLoading(false);
       setError(null);
     }, (watchError) => { setError(watchError.message); setLoading(false); });
-  }, [tenant, user]);
+  }, [tenant.id, userId]);
 
   const visibleRows = useMemo(() => rows.filter((delivery) => delivery.status !== "cancelled"), [rows]);
 
@@ -47,7 +54,6 @@ export function DriverPage() {
     finally { setBusyId(null); }
   }
 
-  if (!tenant) return <LoadingState label="Carregando sorveteria..." />;
   if (loading) return <LoadingState label="Carregando entregas atribuídas..." />;
   return <main className="content driver-content">
     <div className="driver-topbar"><Link to={`/${tenant.slug}/painel`}>← Painel</Link><span>{tenant.branding.displayName}</span></div>
