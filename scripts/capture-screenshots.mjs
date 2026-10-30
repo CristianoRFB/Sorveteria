@@ -171,9 +171,19 @@ async function capture(name, mobile = false) {
 
 async function clearOrigin() {
   await send("Storage.clearDataForOrigin", { origin: baseUrl, storageTypes: "all" });
-  await sleep(300);
   await navigate(`/?qa-reset=${Date.now()}`);
-  await waitUntil(async () => await evaluate("(async () => { const request = indexedDB.open('firebaseLocalStorageDb'); const database = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); if (!database.objectStoreNames.contains('firebaseLocalStorage')) return true; const store = database.transaction('firebaseLocalStorage').objectStore('firebaseLocalStorage'); const query = store.getAll(); const rows = await new Promise((resolve, reject) => { query.onsuccess = () => resolve(query.result); query.onerror = () => reject(query.error); }); return rows.length === 0; })()"), "limpeza da sessão Auth", 15000);
+  // Verify the Firebase SDK's actual identity after a full page navigation.
+  // Opening IndexedDB manually can block indefinitely while Chrome is clearing
+  // it; an Auth-ready check detects any identity leak without that race.
+  await waitUntil(async () => await evaluate(`(async () => {
+    try {
+      const { auth } = await import('/src/lib/firebase.ts');
+      return await Promise.race([
+        auth.authStateReady().then(() => auth.currentUser === null),
+        new Promise((resolve) => setTimeout(() => resolve(false), 1500))
+      ]);
+    } catch { return false; }
+  })()`), "Firebase Auth sem sessão anterior", 20000);
 }
 
 try {
