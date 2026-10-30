@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import type { CatalogCategory, CatalogProduct } from "@/domain/catalog";
 import type { Order, OrderStatus } from "@/domain/order";
+import type { Tenant } from "@/domain/tenant";
 import { useTenant } from "@/hooks/useTenant";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantMembership } from "@/hooks/useTenantMembership";
@@ -51,11 +52,20 @@ function toProductDraft(product: CatalogProduct, categories: CatalogCategory[]):
 
 export function TenantAdminPage() {
   const { tenant } = useTenant();
+  if (!tenant) return <LoadingState label="Carregando sorveteria..." />;
+
+  // Remount the full tenant-scoped admin tree on context changes: never reuse
+  // an Alpha order, membership, selected driver or catalog draft under Beta.
+  return <TenantAdminView key={tenant.id} tenant={tenant} />;
+}
+
+function TenantAdminView({ tenant }: { tenant: Tenant }) {
   const { isPlatformOwner } = useAuth();
   const { membership } = useTenantMembership();
-  const canManage = isPlatformOwner || membership?.role === "tenant_owner" || membership?.role === "tenant_admin";
+  // A membership returned by a hook must always belong to the active tenant.
+  const scopedRole = membership?.tenantId === tenant.id ? membership.role : null;
+  const canManage = isPlatformOwner || scopedRole === "tenant_owner" || scopedRole === "tenant_admin";
   const [tab, setTab] = useState<Tab>("orders");
-  if (!tenant) return <LoadingState label="Carregando sorveteria..." />;
 
   return (
     <main className="content admin-content">
@@ -70,7 +80,7 @@ export function TenantAdminPage() {
         <Link to={`/${tenant.slug}/painel/qr-codes`}>QR do cardápio</Link>
         <Link to={`/${tenant.slug}/cardapio`} target="_blank">Ver loja</Link>
       </div>
-      {(!canManage || tab === "orders") && <OrderManager tenantId={tenant.id} canResetDeliveryCode={isPlatformOwner || membership?.role === "tenant_owner"} />}
+      {(!canManage || tab === "orders") && <OrderManager tenantId={tenant.id} canResetDeliveryCode={isPlatformOwner || scopedRole === "tenant_owner"} />}
       {canManage && tab === "catalog" && <CatalogManager tenantId={tenant.id} />}
       {tab === "settings" && canManage && <><SettingsEditor tenantId={tenant.id} /><TeamManager tenantId={tenant.id} /></>}
     </main>
