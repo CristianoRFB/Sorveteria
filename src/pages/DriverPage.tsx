@@ -54,12 +54,12 @@ export function DriverPage() {
     <span className="eyebrow">Área do entregador</span><h1>Minhas entregas</h1>
     <p className="muted">Veja o endereço e atualize cada etapa. A confirmação é informada pelo cliente no momento da entrega.</p>
     {error && <p className="error-text" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
-    {visibleRows.length === 0 ? <div className="empty-state">Nenhuma entrega atribuída no momento.</div> : <div className="driver-delivery-list">{visibleRows.map((delivery) => <DeliveryCard key={delivery.id} delivery={delivery} tenantId={tenant.id} busy={busyId === delivery.id} code={codes[delivery.id] || ""} setCode={(value) => setCodes((current) => ({ ...current, [delivery.id]: value.toUpperCase() }))} act={act} />)}</div>}
+    {visibleRows.length === 0 ? <div className="empty-state">Nenhuma entrega atribuída no momento.</div> : <div className="driver-delivery-list">{visibleRows.map((delivery) => <DeliveryCard key={delivery.id} delivery={delivery} busy={busyId === delivery.id} code={codes[delivery.id] || ""} setCode={(value) => setCodes((current) => ({ ...current, [delivery.id]: value.toUpperCase() }))} act={act} />)}</div>}
   </main>;
 }
 
-function DeliveryCard({ delivery, tenantId, busy, code, setCode, act }: {
-  delivery: DriverDelivery; tenantId: string; busy: boolean; code: string;
+function DeliveryCard({ delivery, busy, code, setCode, act }: {
+  delivery: DriverDelivery; busy: boolean; code: string;
   setCode: (value: string) => void;
   act: (delivery: DriverDelivery, action: "start" | "arrive" | "deliver" | "failed") => Promise<void>;
 }) {
