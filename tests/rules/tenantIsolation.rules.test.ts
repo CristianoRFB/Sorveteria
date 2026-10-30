@@ -99,6 +99,19 @@ describe("Firestore Rules — tenant isolation", () => {
     await assertFails(getDoc(doc(db, "memberships/tenant-alpha_owner-alpha")));
   });
 
+  it("visitantes recebem catálogo somente pela projeção HTTPS, nunca documentos brutos", async () => {
+    const anonymous = testEnv!.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(anonymous, "tenants/tenant-alpha/categories/gelatos")));
+    await assertFails(getDoc(doc(anonymous, "tenants/tenant-alpha/products/pot")));
+    await assertFails(getDocs(collection(anonymous, "tenants/tenant-alpha/categories")));
+    await assertFails(getDocs(collection(anonymous, "tenants/tenant-alpha/products")));
+    const customer = signed("customer-alpha");
+    await assertFails(getDoc(doc(customer, "tenants/tenant-alpha/products/pot")));
+    const owner = signed("owner-alpha");
+    await assertSucceeds(getDoc(doc(owner, "tenants/tenant-alpha/products/pot")));
+    await assertSucceeds(getDoc(doc(owner, "tenants/tenant-alpha/categories/gelatos")));
+  });
+
   it("cliente não altera role, preço, status, totais ou campos privilegiados", async () => {
     const db = signed("customer-alpha");
     await assertSucceeds(getDoc(doc(db, "tenants/tenant-alpha/orders/order-alpha")));
