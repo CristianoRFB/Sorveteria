@@ -727,6 +727,61 @@ exports.getPublicOrderTracking = onCall({region:REGION,maxInstances:20}, async (
   return {tracking:order.exists ? projectPublicTracking(order.data(),code) : null};
 });
 
+/**
+ * Authenticated, tenant-scoped administrative read for the Owner orders panel.
+ * Firestore browser listeners can stall in headless emulator runs; this finite
+ * HTTPS callable returns bounded, explicitly projected operational fields.
+ * No privateDeliveryCodes, password reset tokens, or platform-global reads.
+ */
+exports.getTenantOperationsSnapshot = onCall({ region: REGION, maxInstances: 20 }, async (request) => {
+  const auth = requireAuth(request);
+  const tenantId = requireText(request.data?.tenantId, "Sorveteria", 128);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId)) fail("invalid-argument", "Tenant invalido.");
+  const tenantRef = db.doc("tenants/" + tenantId);
+  const memberRef = db.doc("memberships/" + tenantId + "_" + auth.uid);
+  const [tenant, member] = await Promise.all([tenantRef.get(), auth.token.platform_owner === true ? Promise.resolve(null) : memberRef.get()]);
+  if (!tenant.exists) fail("not-found", "Sorveteria inexistente.");
+  if (auth.token.platform_owner !== true) {
+    const membership = member?.exists ? member.data() : null;
+    if (!membership || membership.userId !== auth.uid || membership.tenantId !== tenantId
+      || membership.status !== "active" || !ADMIN_ROLES.has(membership.role)) {
+      fail("permission-denied", "Acesso ao painel de pedidos nao autorizado.");
+    }
+  }
+  const [orders, deliveries, memberships] = await Promise.all([
+    tenantRef.collection("orders").orderBy("createdAt","desc").limit(100).get(),
+    tenantRef.collection("deliveries").orderBy("updatedAt","desc").limit(100).get(),
+    db.collection("memberships").where("tenantId","==",tenantId).limit(250).get(),
+  ]);
+  return {
+    orders: orders.docs.map((item) => {
+      const d = item.data();
+      return {
+        id:item.id, tenantId, publicCode:d.publicCode, status:d.status,
+        customer:d.customer, address:d.address || null,
+        fulfillmentMode:d.fulfillmentMode, source:d.source,
+        items:d.items, paymentMethodId:d.paymentMethodId, money:d.money,
+        estimatedMinutes:d.estimatedMinutes ?? null,
+      };
+    }),
+    deliveries: deliveries.docs.map((item) => {
+      const d = item.data();
+      return {
+        id:item.id, tenantId, orderId:d.orderId, driverId:d.driverId,
+        status:d.status, failedAttempts:d.failedAttempts ?? 0,
+        confirmationFailures:d.confirmationFailures ?? 0,
+      };
+    }),
+    drivers: memberships.docs.filter((item) => {
+      const d = item.data();
+      return d.role === "driver" && d.status === "active" && d.tenantId === tenantId;
+    }).map((item) => {
+      const d = item.data();
+      return {id:item.id,tenantId,userId:d.userId,role:"driver",status:"active",displayName:d.displayName??"",email:d.email??""};
+    }),
+  };
+});
+
 exports.updateOrderStatus = onCall({ region: REGION }, async (request) => {
   const auth = requireAuth(request);
   const tenantId = requireText(request.data?.tenantId, "Sorveteria", 128);

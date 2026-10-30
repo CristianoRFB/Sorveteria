@@ -15,6 +15,60 @@ import type { Membership } from "@/domain/membership";
 import type { TenantPlanId, TenantSubscriptionStatus } from "@/domain/tenant";
 import { db, functions } from "@/lib/firebase";
 
+/** Finite HTTPS snapshot for Owner operations; avoids emulator browser WebChannel hangs. */
+export type TenantOperationsSnapshot = {orders: Order[];drivers: Membership[];deliveries: DriverDelivery[]};
+export function watchTenantOperations(
+  tenantId: string,
+  onRows: (snapshot: TenantOperationsSnapshot) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  const callable = httpsCallable<{tenantId:string},TenantOperationsSnapshot>(
+    functions, "getTenantOperationsSnapshot", {timeout:20_000},
+  );
+  let active = true;
+  let inFlight = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const clearTimer = () => { if (timer !== undefined) clearTimeout(timer); timer=undefined; };
+  let failures = 0;
+  const refresh = async () => {
+    if (!active || inFlight || document.visibilityState === "hidden") return;
+    inFlight = true;
+    try {
+      const result = await callable({tenantId});
+      if (!active) return;
+      failures = 0;
+      onRows(result.data);
+    } catch (error) {
+      if (active) {
+        failures += 1;
+        onError(error instanceof Error ? error : new Error("Não foi possível atualizar os pedidos."));
+      }
+    } finally {
+      inFlight = false;
+      if (active) {
+        clearTimer();
+        timer = setTimeout(() => { void refresh(); }, Math.min(30_000, 8_000 * 2 ** Math.min(2,failures)));
+      }
+    }
+  };
+  const visibility = () => {
+    if (!active) return;
+    if (document.visibilityState === "visible") {
+      clearTimer();
+      void refresh();
+    } else clearTimer();
+  };
+  document.addEventListener("visibilitychange",visibility);
+  void refresh();
+  return () => {
+    active = false;
+    clearTimer();
+    document.removeEventListener("visibilitychange",visibility);
+  };
+}
+
+
+
 export type TenantSummary = {
   id: string;
   slug: string;

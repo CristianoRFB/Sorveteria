@@ -8,6 +8,9 @@ on:
       - 'scripts/lib/qaNetworkTrace.mjs'
       - 'src/pages/TenantTrackingPage.tsx'
       - 'src/services/orderService.ts'
+      - 'src/services/tenantOperations.ts'
+      - 'src/pages/TenantAdminPage.tsx'
+      - 'functions/index.js'
       - 'src/lib/firebase.ts'
       - 'src/domain/firestoreTransport.ts'
   workflow_dispatch:

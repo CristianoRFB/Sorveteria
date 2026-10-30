@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTenantMembership } from "@/hooks/useTenantMembership";
 import { listCatalog, saveCategory, saveProduct } from "@/services/catalogService";
 import { assignDelivery, changeOrderStatus, resetDeliveryConfirmationCode } from "@/services/orderService";
-import { addTenantMember, setTenantMemberStatus, watchDrivers, watchOrders, watchTenantDeliveries, watchTenantMembers, type DriverDelivery } from "@/services/tenantOperations";
+import { addTenantMember, setTenantMemberStatus, watchTenantOperations, watchTenantMembers, type DriverDelivery } from "@/services/tenantOperations";
 import type { Membership } from "@/domain/membership";
 import { loadTenantSettings, saveTenantSettings, type TenantSettings } from "@/services/tenantSettings";
 import { LoadingState } from "@/components/LoadingState";
@@ -242,9 +242,13 @@ function OrderManager({ tenantId, canResetDeliveryCode }: { tenantId: string; ca
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => watchOrders(tenantId, (rows) => { setOrders(rows); setLoading(false); setError(null); }, (watchError) => { setError(watchError.message); setLoading(false); }), [tenantId]);
-  useEffect(() => watchDrivers(tenantId, setDrivers, (watchError) => setError(watchError.message)), [tenantId]);
-  useEffect(() => watchTenantDeliveries(tenantId, setDeliveries, (watchError) => setError(watchError.message)), [tenantId]);
+  useEffect(() => watchTenantOperations(tenantId, (snapshot) => {
+    setOrders(snapshot.orders);
+    setDrivers(snapshot.drivers);
+    setDeliveries(snapshot.deliveries);
+    setLoading(false);
+    setError(null);
+  }, (watchError) => { setError(watchError.message); setLoading(false); }), [tenantId]);
 
   async function transition(order: Order, status: OrderStatus) {
     const reason = status === "cancelled" ? window.prompt("Motivo do cancelamento:")?.trim() : undefined;
