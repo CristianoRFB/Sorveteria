@@ -61,12 +61,11 @@ describe("fluxo essencial em dois tenants", () => {
     });
     expect(created.data).toMatchObject({ slug: "tenant-readiness", status: "onboarding", ownerFound: false });
 
-    const publicLookup = () => getDocs(query(
-      collection(db, "tenants"),
-      where("slug", "==", "tenant-readiness"),
-      where("status", "==", "active"),
-    ));
-    expect((await publicLookup()).empty).toBe(true);
+    // The public resolver must hide onboarding and suspended stores,
+    // even when the Platform Owner can read full tenant metadata.
+    const publicLookup=async()=> (await callable<{slug:string},{tenant:{id:string;slug:string}|null}>(
+      "getPublicTenant")({slug:"tenant-readiness"})).data.tenant;
+    expect(await publicLookup()).toBeNull();
 
     const setStatus = callable<{ tenantId: string; status: "active" | "suspended"; reason: string }, { tenantId: string; status: string }>("setTenantStatus");
     await setStatus({ tenantId: created.data.tenantId, status: "active", reason: "Responsável validado para homologação" });
@@ -95,10 +94,12 @@ describe("fluxo essencial em dois tenants", () => {
       .rejects.toMatchObject({ code: "functions/failed-precondition" });
     const entered = await callable<{ tenantId: string }, { tenantId: string; slug: string }>("enterTenantContext")({ tenantId: created.data.tenantId });
     expect(entered.data.slug).toBe("tenant-readiness");
-    expect((await publicLookup()).docs).toHaveLength(1);
+    expect(await publicLookup()).toMatchObject({id:created.data.tenantId,slug:"tenant-readiness"});
 
     await setStatus({ tenantId: created.data.tenantId, status: "suspended", reason: "Fim do cenário de homologação" });
-    expect((await publicLookup()).empty).toBe(true);
+    expect(await publicLookup()).toBeNull();
+    await expect(callable("getPublicCheckoutSettings")({tenantId:created.data.tenantId}))
+      .rejects.toMatchObject({code:"functions/not-found"});
     const audit = await getDocs(collection(db, `tenants/${created.data.tenantId}/auditLogs`));
     expect(audit.docs.map((entry) => entry.data().action)).toEqual(expect.arrayContaining([
       "tenant.created", "tenant.reactivated", "tenant.plan_assigned", "tenant.context_entered", "tenant.suspended",
