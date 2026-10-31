@@ -247,3 +247,6 @@ label { display: grid; gap: 8px; color: #51475d; font-size: .9rem; font-weight: 
 .tenant-scope .category-chips button.selected { background: var(--tenant-primary, #6d28d9); border-color: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
 .tenant-scope .cart-button span { background: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
 .tenant-scope button:focus-visible, .tenant-scope a:focus-visible, .tenant-scope input:focus-visible { outline-color: var(--tenant-primary, #6d28d9); }
+
+/* Real catalog photos with a stable fallback for missing or unreachable assets. */
+.product-photo { display: block; width: 100%; height: 150px; object-fit: cover; background: #f1e9ff; }

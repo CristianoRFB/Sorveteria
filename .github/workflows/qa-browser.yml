@@ -16,6 +16,7 @@ on:
       - 'src/services/tenantResolver.ts'
       - 'src/services/tenantSettings.ts'
       - 'src/pages/CheckoutPage.tsx'
+      - 'src/pages/TenantMenuPage.tsx'
       - 'functions/domain/public-tenant.cjs'
       - 'src/pages/TenantAdminPage.tsx'
       - 'src/pages/DriverPage.tsx'
