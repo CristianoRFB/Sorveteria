@@ -113,3 +113,32 @@ describe("Owner HTTPS operations snapshot RBAC and Alpha/Beta isolation",()=>{
     await expect(snapshot("../tenant-beta")).rejects.toMatchObject({code:"functions/invalid-argument"});
   });
 });
+
+describe("product images can be created, edited and removed by a scoped manager",()=>{
+  const createdId="image-test-product-"+Date.now().toString(36);
+  const newProduct={name:"Gelato imagem teste",description:"",categoryId:"gelatos",kind:"pot",
+    priceCents:1200,available:true,optionGroups:[]};
+  const edit=(tenantId:string, imageUrl:string)=>{
+    const call=httpsCallable(functions,"saveCatalogProduct");
+    return call({tenantId,productId:createdId,product:{...newProduct,imageUrl}});
+  };
+  it("allows an Alpha manager to add an HTTPS image and safely clear it",async()=>{
+    await login("owner.alpha@demo.sorveteria.test");
+    const create=httpsCallable(functions,"saveCatalogProduct");
+    await create({tenantId:"tenant-alpha",productId:createdId,product:{...newProduct,imageUrl:"https://static.example.org/gelato.webp"}});
+    const withPhoto=(await publicCatalog("tenant-alpha")).data.products.find(p=>p.id===createdId);
+    expect(withPhoto).toMatchObject({id:createdId});
+    expect((withPhoto as typeof withPhoto & {imageUrl?:string})?.imageUrl).toBe("https://static.example.org/gelato.webp");
+    await edit("tenant-alpha","");
+    const cleared=(await publicCatalog("tenant-alpha")).data.products.find(p=>p.id===createdId);
+    expect(cleared).not.toHaveProperty("imageUrl");
+  });
+  it("rejects non-HTTPS URLs and cross-tenant modification",async()=>{
+    await login("owner.alpha@demo.sorveteria.test");
+    await expect(edit("tenant-alpha","javascript:alert(1)"))
+      .rejects.toMatchObject({code:"functions/invalid-argument"});
+    await login("owner.beta@demo.sorveteria.test");
+    await expect(edit("tenant-alpha","https://static.example.org/other.webp"))
+      .rejects.toMatchObject({code:"functions/permission-denied"});
+  });
+});

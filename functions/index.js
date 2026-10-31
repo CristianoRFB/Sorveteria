@@ -180,9 +180,20 @@ function validateCatalogProduct(input) {
     });
     return { id, name: groupName, required: group.required, minSelections: group.minSelections, maxSelections: group.maxSelections, options };
   });
-  const imageUrl = typeof input.imageUrl === "string" && input.imageUrl ? input.imageUrl : null;
-  if (imageUrl && !/^https:\/\//.test(imageUrl)) fail("invalid-argument", "A imagem precisa usar HTTPS.");
-  return { name, description, categoryId, kind: input.kind, priceCents: input.priceCents, available: input.available, optionGroups, ...(imageUrl ? { imageUrl } : {}) };
+  // Explicit empty string clears a previous image; omission preserves it for older clients.
+  if (input.imageUrl !== undefined && typeof input.imageUrl !== "string")
+    fail("invalid-argument", "A imagem precisa ser uma URL HTTPS.");
+  const imageUrl = typeof input.imageUrl === "string" ? input.imageUrl.trim() : null;
+  if (imageUrl) {
+    let parsed;
+    try { parsed = new URL(imageUrl); }
+    catch { fail("invalid-argument", "URL da imagem inválida."); }
+    if (imageUrl.length > 2048 || parsed.protocol !== "https:" || !parsed.hostname)
+      fail("invalid-argument", "A imagem precisa usar HTTPS.");
+  }
+  return { name, description, categoryId, kind: input.kind, priceCents: input.priceCents,
+    available: input.available, optionGroups,
+    ...(input.imageUrl === undefined ? {} : { imageUrl: imageUrl || null }) };
 }
 
 function resolveSelections(product, selections) {
