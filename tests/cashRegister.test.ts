@@ -21,7 +21,7 @@ describe("manual cash register domain boundaries",()=>{
       {openingCents:200,requestId:uuid,privateField:"unsafe"}])
       expect(()=>validateCashOpening(input)).toThrow();
     for(const input of [{kind:"inflow",amountCents:0},{kind:"outflow",amountCents:1000001},
-      {kind:"inflow",amountCents:10,note:"bad"},
+      {kind:"inflow",amountCents:10,note:"ab"},
       {kind:"refund",amountCents:100},{kind:"inflow",amountCents:4.5}]){
       expect(()=>validateCashMovement({shiftId,requestId:uuid,note:"Troco",...input})).toThrow();
     }
