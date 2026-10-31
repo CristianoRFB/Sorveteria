@@ -19,6 +19,13 @@ describe("public catalogue allowlist",()=>{
     expect(JSON.stringify(x)).not.toMatch(/DO_NOT_LEAK|javascript:/);
     expect(x.products[0].optionGroups[0].options[0]).toEqual({id:"small",name:"Pequeno",priceDeltaCents:0,available:true});
   });
+  it("keeps an HTTPS product photo URL without leaking non-public product fields",()=>{
+    const product=item("a","active",true);
+    product.data.imageUrl="https://cdn.example.com/sorvetes/gelato.webp";
+    const result=projectPublicCatalog([cat("active",true)],[product]);
+    expect(result.products[0].imageUrl).toBe(product.data.imageUrl);
+    expect(JSON.stringify(result)).not.toContain("DO_NOT_LEAK");
+  });
   it("rejects invalid product data instead of exposing it",()=>{
     const bad=item("bad","active",true);bad.data.priceCents=Number.NaN;
     expect(projectPublicCatalog([cat("active",true)],[bad]).products).toEqual([]);
