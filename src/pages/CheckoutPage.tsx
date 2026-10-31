@@ -29,6 +29,7 @@ export function CheckoutPage() {
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [address, setAddress] = useState({ street: "", number: "", neighborhood: "", reference: "" });
   const [paymentMethodId, setPaymentMethodId] = useState("");
+  const [couponCode,setCouponCode]=useState("");
 
   useEffect(() => {
     if (!tenant) return;
@@ -54,6 +55,7 @@ export function CheckoutPage() {
     && canUseTenantFeature(tenant, "web_orders");
   const deliveryAllowed = canUseTenantFeature(tenant, "simple_delivery");
   const pickupAllowed = canUseTenantFeature(tenant, "pickup");
+  const couponsAllowed=canUseTenantFeature(tenant,"coupons");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -71,6 +73,7 @@ export function CheckoutPage() {
         customer,
         ...(fulfillmentMode === "delivery" ? { address } : {}),
         paymentMethodId,
+        ...(couponsAllowed&&couponCode.trim()?{couponCode:couponCode.trim().toUpperCase()}:{}),
         items,
       });
       clear();
@@ -90,6 +93,10 @@ export function CheckoutPage() {
     <p>A sorveteria recebeu seu pedido. Guarde o código para acompanhar o andamento.</p>
     <div className="code-panel"><small>Código público do pedido</small><strong>{createdOrder.publicCode}</strong><Link to={`/${tenant.slug}/acompanhar?code=${createdOrder.publicCode}`}>Acompanhar pedido</Link></div>
     {createdOrder.deliveryCode && <div className="delivery-code-notice"><strong>Código de confirmação da entrega</strong><span>{createdOrder.deliveryCode}</span><p>Mostre este código ao entregador quando seu pedido chegar. Ele é diferente do código de acompanhamento.</p></div>}
+    {typeof createdOrder.totalCents==="number"&&<div className="notice" role="status">
+      {createdOrder.discountCents?<>Desconto aplicado: {money(createdOrder.discountCents)}. </>:null}
+      Total confirmado pelo servidor: <strong>{money(createdOrder.totalCents)}</strong>
+    </div>}
     {createdOrder.replayed && createdOrder.deliveryCode === null && fulfillmentMode === "delivery" && <p className="notice" role="status">O pedido já havia sido recebido. Para recuperar um código de entrega perdido, solicite à sorveteria um novo código.</p>}
     {settings && settings.paymentMethods.find((method) => method.id === paymentMethodId)?.instructions && <div className="notice"><strong>Pagamento:</strong> {settings.paymentMethods.find((method) => method.id === paymentMethodId)?.instructions}</div>}
     <Link className="button secondary" to={`/${tenant.slug}`}>Voltar à loja</Link>
@@ -115,7 +122,11 @@ export function CheckoutPage() {
         </div></section>
         <section className="checkout-section"><span className="step-number">3</span><div><h2>Pagamento</h2>{enabledPayments.length === 0 ? <p className="error-text">A loja ainda não configurou formas de pagamento.</p> : <div className="payment-choice-list">{enabledPayments.map((method) => <label className="payment-choice" key={method.id}><input required type="radio" name="payment" value={method.id} checked={paymentMethodId === method.id} onChange={() => setPaymentMethodId(method.id)} /><span><strong>{method.label}</strong>{method.instructions && <small>{method.instructions}</small>}</span></label>)}</div>}</div></section>
       </div>
-      <aside className="checkout-summary"><h2>Revisão do pedido</h2><ul>{items.map((item) => <li key={item.lineId}><span>{item.quantity}× {item.name}</span><strong>{money(item.unitPriceCents * item.quantity)}</strong></li>)}</ul><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div>{fulfillmentMode === "delivery" && <div><span>Entrega</span><strong>{deliveryPricing?money(fee):"Bairro não atendido"}</strong></div>}<div className="checkout-total"><span>Total estimado</span><strong>{money(subtotal + fee)}</strong></div><p className="form-hint">Os preços e a disponibilidade são conferidos novamente pela sorveteria ao receber o pedido.</p>{error && <p className="error-text" role="alert">{error}</p>}<button className="button primary full-width" type="submit" disabled={pending || enabledPayments.length === 0 || !checkoutAllowed || (fulfillmentMode === "delivery" && (!deliveryAllowed||!deliveryAddressAllowed)) || (fulfillmentMode === "pickup" && !pickupAllowed)}>{pending ? "Enviando pedido..." : "Confirmar pedido"}</button></aside>
+      <aside className="checkout-summary"><h2>Revisão do pedido</h2><ul>{items.map((item) => <li key={item.lineId}><span>{item.quantity}× {item.name}</span><strong>{money(item.unitPriceCents * item.quantity)}</strong></li>)}</ul><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div>{fulfillmentMode === "delivery" && <div><span>Entrega</span><strong>{deliveryPricing?money(fee):"Bairro não atendido"}</strong></div>}{couponsAllowed&&<label className="coupon-checkout-input">Cupom (opcional)<input maxLength={24} value={couponCode}
+        placeholder="GELATO10" autoCapitalize="characters"
+        onChange={e=>setCouponCode(e.target.value.toUpperCase())}/>
+        <small>O desconto será validado e aplicado sobre os produtos pelo servidor ao confirmar o pedido.</small></label>}
+      <div className="checkout-total"><span>{couponCode.trim()&&couponsAllowed?"Total antes do cupom":"Total estimado"}</span><strong>{money(subtotal + fee)}</strong></div><p className="form-hint">Os preços e a disponibilidade são conferidos novamente pela sorveteria ao receber o pedido.</p>{error && <p className="error-text" role="alert">{error}</p>}<button className="button primary full-width" type="submit" disabled={pending || enabledPayments.length === 0 || !checkoutAllowed || (fulfillmentMode === "delivery" && (!deliveryAllowed||!deliveryAddressAllowed)) || (fulfillmentMode === "pickup" && !pickupAllowed)}>{pending ? "Enviando pedido..." : "Confirmar pedido"}</button></aside>
     </form>
   </main>;
 }

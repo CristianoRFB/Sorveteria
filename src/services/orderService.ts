@@ -10,6 +10,7 @@ export type CheckoutInput = {
   customer: { name: string; phone: string };
   address?: { street: string; number: string; neighborhood: string; reference?: string };
   paymentMethodId: string;
+  couponCode?: string;
   requestId?: string;
   items: CartItem[];
 };
@@ -17,7 +18,7 @@ type CreateOrderPayload = Omit<CheckoutInput, "items"> & {
   items: Array<{ productId: string; quantity: number; selections: CartItem["selections"] }>;
 };
 
-export type CreatedOrder = { orderId: string; publicCode: string; deliveryCode: string | null; replayed?: boolean };
+export type CreatedOrder = { orderId: string; publicCode: string; deliveryCode: string | null; replayed?: boolean; discountCents?:number;totalCents?:number };
 
 export async function createOrder(input: CheckoutInput): Promise<CreatedOrder> {
   const call = httpsCallable<CreateOrderPayload, CreatedOrder>(functions, "createOrder");

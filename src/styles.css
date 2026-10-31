@@ -296,3 +296,13 @@ label { display: grid; gap: 8px; color: #51475d; font-size: .9rem; font-weight: 
  border:1px solid #e8dfed; border-radius:16px; }
 .delivery-zone-editor legend { padding:0 8px; font-weight:800; }
 .delivery-zone-editor textarea { width:100%; resize:vertical; }
+
+/* Promotional coupons: explicit manager form and server-confirmed checkout total. */
+.coupon-list { display:grid;gap:10px;margin:18px 0 24px; }
+.coupon-row {display:flex;gap:14px;justify-content:space-between;align-items:center;flex-wrap:wrap;
+  padding:14px;border:1px solid #eadff0;border-radius:14px;background:#fff;}
+.coupon-row > div:first-child {display:grid;gap:4px;min-width:180px;}
+.coupon-row span {font-size:.88rem;color:#554c61;}
+.coupon-editor {padding-top:16px;border-top:1px solid #eadff0;}
+.coupon-checkout-input {display:grid;gap:7px;margin:4px 0;}
+.coupon-checkout-input small {color:#51475d;line-height:1.5;}
