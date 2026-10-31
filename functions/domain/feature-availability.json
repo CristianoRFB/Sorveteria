@@ -22,7 +22,7 @@
   "table_qr": "not_implemented",
   "cash_register": "not_implemented",
   "operational_finance": "not_implemented",
-  "coupons": "not_implemented",
+  "coupons": "implemented",
   "expanded_team": "not_implemented",
   "intermediate_reports": "not_implemented",
   "inventory": "not_implemented",

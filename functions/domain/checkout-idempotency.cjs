@@ -38,6 +38,8 @@ function assertCheckoutFingerprintInput(data) {
       || (a.reference !== undefined && (typeof a.reference !== "string" || a.reference.length > 180)))
       throw new TypeError("Endereço da tentativa de checkout inválido.");
   }
+  if(data.couponCode!=null && (typeof data.couponCode!=="string" || !/^[A-Z0-9][A-Z0-9-]{3,22}[A-Z0-9]$/.test(data.couponCode)))
+    throw new TypeError("Cupom de tentativa inválido.");
   for (const item of data.items) {
     if (!item || typeof item !== "object" || Array.isArray(item)
       || typeof item.productId !== "string" || !item.productId.trim() || item.productId.length > 128
@@ -61,6 +63,7 @@ function checkoutFingerprint(data) {
     customer:{name:data.customer.name,phone:data.customer.phone},
     address:data.fulfillmentMode === "delivery" ? data.address : null,
     paymentMethodId:data.paymentMethodId,
+    ...(data.couponCode?{couponCode:data.couponCode}:{}),
     items:data.items.map(i=>({productId:i.productId,quantity:i.quantity,selections:i.selections??{}})),
   })));
 }
@@ -69,6 +72,8 @@ function replayCheckout(record, expectedFingerprint) {
     throw new TypeError("Esta tentativa já foi usada com dados diferentes. Confirme o pedido existente antes de recomeçar.");
   if (typeof record.orderId !== "string" || typeof record.publicCode !== "string")
     throw new TypeError("Registro de tentativa inconsistente. Consulte o suporte.");
-  return {orderId:record.orderId,publicCode:record.publicCode,deliveryCode:null,replayed:true};
+  return {orderId:record.orderId,publicCode:record.publicCode,deliveryCode:null,replayed:true,
+    ...(Number.isSafeInteger(record.discountCents)&&Number.isSafeInteger(record.totalCents)
+      ?{discountCents:record.discountCents,totalCents:record.totalCents}:{})};
 }
 module.exports = {normalizeCheckoutRequestId,checkoutDocumentId,checkoutFingerprint,replayCheckout};

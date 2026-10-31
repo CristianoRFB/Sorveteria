@@ -84,6 +84,11 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      match /coupons/{couponCode} {
+        // Codes and redemption counters must never be readable or writable by clients.
+        allow read, write: if false;
+      }
+
       match /orders/{orderId} {
         // Drivers use getDriverAssignments HTTPS instead of raw order PII.
         allow get: if platformOwner() || tenantStaff(tenantId)

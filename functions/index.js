@@ -13,6 +13,7 @@ const { isActiveTenantMembership } = require("./domain/membership.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const {projectPublicTenant,projectPublicCheckoutSettings}=require("./domain/public-tenant.cjs");
 const {buildBasicSalesSummary}=require("./domain/sales-summary.cjs");
+const {normalizeCouponCode,validateCouponConfig,calculateCouponDiscount}=require("./domain/coupons.cjs");
 const {validateDeliveryZones,quoteDeliveryZone}=require("./domain/delivery-zones.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
@@ -761,6 +762,68 @@ exports.setTenantMemberStatus = onCall({ region: REGION }, async (request) => {
   return { userId, status };
 });
 
+/** Coupon manager endpoints. Codes are never publicly enumerable. */
+exports.getTenantCoupons=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  const ref=db.doc("tenants/"+tenantId);
+  const [tenant,member]=await Promise.all([ref.get(),
+    auth.token.platform_owner===true?Promise.resolve(null):
+      db.doc("memberships/"+tenantId+"_"+auth.uid).get()]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const m=member?.exists?member.data():null;
+    if(!isActiveTenantMembership(m,tenantId,auth.uid)||!["tenant_owner","tenant_admin"].includes(m.role))
+      fail("permission-denied","Apenas gestores podem consultar cupons.");
+  }
+  requireCommercialFeature(tenant.data(),"coupons");
+  const snap=await ref.collection("coupons").orderBy(FieldPath.documentId()).limit(101).get();
+  if(snap.size>100)fail("resource-exhausted","Limite de 100 cupons atingido.");
+  return {coupons:snap.docs.map(d=>{
+    const c=d.data();
+    return {code:d.id,kind:c.kind,value:c.value,minSubtotalCents:c.minSubtotalCents,
+      maxUses:c.maxUses,usedCount:c.usedCount??0,active:c.active,expiresAt:c.expiresAt??null};
+  })};
+});
+exports.upsertTenantCoupon=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  let coupon;
+  try{coupon=validateCouponConfig(request.data?.coupon);}
+  catch(e){fail("invalid-argument",e.message);}
+  const ref=db.doc("tenants/"+tenantId);
+  const couponRef=ref.collection("coupons").doc(coupon.code);
+  await db.runTransaction(async tx=>{
+    const tenant=await tx.get(ref);
+    if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+    const member=await requireTenantManager(tx,tenantId,auth);
+    requireCommercialFeature(tenant.data(),"coupons");
+    const previous=await tx.get(couponRef);
+    const usedCount=previous.exists?previous.data().usedCount:0;
+    if(!Number.isSafeInteger(usedCount)||usedCount<0)
+      fail("failed-precondition","Histórico do cupom inválido.");
+    if(coupon.maxUses!==null&&coupon.maxUses<usedCount)
+      fail("failed-precondition","O limite não pode ser inferior às utilizações realizadas.");
+    if(usedCount>0){
+      const old=previous.data();
+      if(old.kind!==coupon.kind||old.value!==coupon.value
+        ||old.minSubtotalCents!==coupon.minSubtotalCents
+        ||old.expiresAt!==coupon.expiresAt)
+        fail("failed-precondition","Não altere as regras financeiras de um cupom já utilizado.");
+    }
+    tx.set(couponRef,{...coupon,usedCount,updatedAt:FieldValue.serverTimestamp(),
+      ...(previous.exists?{}:{createdAt:FieldValue.serverTimestamp()})},{merge:true});
+    tx.create(ref.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:member?.data.role||"platform_owner",
+      action:"coupon.updated",entityType:"coupon",entityId:coupon.code,
+      metadata:{active:coupon.active,maxUses:coupon.maxUses,previouslyUsed:usedCount},
+    }));
+  });
+  return {code:coupon.code,success:true};
+});
+
 exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (request) => {
   const data = request.data || {};
   const tenantId = requireText(data.tenantId, "Sorveteria", 128);
@@ -773,9 +836,13 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
   };
   const address = fulfillmentMode === "delivery" ? validateAddress(data.address) : null;
   const paymentMethodId = requireText(data.paymentMethodId, "Forma de pagamento", 40);
+  let couponCode;
+  try{couponCode=normalizeCouponCode(data.couponCode);}
+  catch(e){fail("invalid-argument",e.message);}
   let requestId;
   try { requestId = normalizeCheckoutRequestId(data.requestId); }
   catch (error) { fail("invalid-argument", error.message); }
+  if(couponCode&&!requestId)fail("invalid-argument","Cupom exige identificador de tentativa do pedido.");
   const tenantRef = db.doc(`tenants/${tenantId}`);
   // Backwards-compatible: old checkout clients may omit requestId during rollout.
   const idempotencyRef = requestId
@@ -783,13 +850,14 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
     : null;
   let fingerprint = null;
   if (idempotencyRef) {
-    try { fingerprint = checkoutFingerprint({ tenantId, fulfillmentMode, customer, address, paymentMethodId, items: data.items }); }
+    try { fingerprint = checkoutFingerprint({ tenantId, fulfillmentMode, customer, address, paymentMethodId, items: data.items, couponCode }); }
     catch (error) { fail("invalid-argument", error.message); }
   }
   const orderRef = tenantRef.collection("orders").doc();
   const trackingCode = generatedCode("SV-");
   const deliveryCode = fulfillmentMode === "delivery" ? generatedCode() : null;
   const zonesRef=tenantRef.collection("settings").doc("deliveryZones");
+  const couponRef=couponCode?tenantRef.collection("coupons").doc(couponCode):null;
   const trackingRef = tenantRef.collection("publicOrderTracking").doc(trackingCode);
   const productRefs = data.items.map((item) => {
     if (!item || typeof item !== "object") fail("invalid-argument", "Item do pedido inválido.");
@@ -800,9 +868,11 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
   await db.runTransaction(async (transaction) => {
     const snapshots = await Promise.all([
       transaction.get(tenantRef), transaction.get(tenantRef.collection("settings").doc("main")), transaction.get(trackingRef),
-      transaction.get(zonesRef),...productRefs.map((ref) => transaction.get(ref)),
+      transaction.get(zonesRef),
+      couponRef?transaction.get(couponRef):Promise.resolve(null),
+      ...productRefs.map((ref) => transaction.get(ref)),
     ]);
-    const [tenantSnapshot, settingsSnapshot, trackingSnapshot, zonesSnapshot, ...productSnapshots] = snapshots;
+    const [tenantSnapshot, settingsSnapshot, trackingSnapshot, zonesSnapshot, couponSnapshot, ...productSnapshots] = snapshots;
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria indisponível para novos pedidos.");
     // Atomic: competing transactions cannot both create the same marker.
     const existingRequest = idempotencyRef ? await transaction.get(idempotencyRef) : null;
@@ -860,7 +930,15 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
     }
     const deliveryFeeCents=fulfillmentMode==="delivery"
       ?(zoneQuote?.feeCents??settings.deliveryFeeCents):0;
-    const totalCents = subtotalCents + deliveryFeeCents;
+    let discountCents=0;
+    if(couponCode){
+      requireCommercialFeature(tenant,"coupons");
+      const coupon=couponSnapshot?.exists?couponSnapshot.data():null;
+      discountCents=calculateCouponDiscount(coupon,subtotalCents);
+      if(discountCents===null)fail("failed-precondition",
+        "Cupom inválido, expirado, esgotado ou não aplicável ao subtotal.");
+    }
+    const totalCents=subtotalCents+deliveryFeeCents-discountCents;
     const createdAt = FieldValue.serverTimestamp();
     const order = {
       tenantId,
@@ -869,13 +947,14 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
       customer,
       address,
       deliveryZoneId:zoneQuote?.zoneId??null,
+      couponCode:couponCode??null,
       fulfillmentMode,
       status: "received",
       source: { channel: "web" },
       items: lineItems,
       paymentMethodId,
       paymentMethodLabel: paymentMethod.label,
-      money: { subtotalCents, deliveryFeeCents, discountCents: 0, totalCents },
+      money: { subtotalCents, deliveryFeeCents, discountCents, totalCents },
       estimatedMinutes: settings.estimatedMinutes,
       deliveryCodeUsedAt: null,
       timeline: [{ status: "received", at: new Date().toISOString() }],
@@ -883,6 +962,7 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
       updatedAt: createdAt,
     };
     transaction.create(orderRef, order);
+    if(couponRef)transaction.update(couponRef,{usedCount:FieldValue.increment(1)});
     transaction.create(trackingRef, {
       publicCode: trackingCode,
       status: "received",
@@ -897,9 +977,9 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
       createdAt,
     });
     if (idempotencyRef) transaction.create(idempotencyRef, {
-      fingerprint, orderId: orderRef.id, publicCode: trackingCode, createdAt,
+      fingerprint, orderId: orderRef.id, publicCode: trackingCode, discountCents,totalCents, createdAt,
     });
-    result = { orderId: orderRef.id, publicCode: trackingCode, deliveryCode, replayed: false };
+    result = { orderId: orderRef.id, publicCode: trackingCode, deliveryCode, discountCents,totalCents,replayed: false };
   });
   return result;
 });
