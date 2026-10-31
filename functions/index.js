@@ -439,10 +439,16 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
   if (!Number.isInteger(settings.deliveryFeeCents) || settings.deliveryFeeCents < 0 || settings.deliveryFeeCents > 100000) fail("invalid-argument", "Taxa de entrega inválida.");
   if (!Number.isInteger(settings.estimatedMinutes) || settings.estimatedMinutes < 1 || settings.estimatedMinutes > 600) fail("invalid-argument", "Estimativa inválida.");
   if (!Array.isArray(settings.paymentMethods) || settings.paymentMethods.length < 1 || settings.paymentMethods.length > 8) fail("invalid-argument", "Formas de pagamento inválidas.");
+  const paymentIds = new Set();
   for (const method of settings.paymentMethods) {
-    if (!hasOnlyKeys(method, ["id", "label", "instructions", "enabled"]) || !/^[a-z0-9_-]{2,40}$/.test(method.id)
+    if (!hasOnlyKeys(method, ["id", "label", "instructions", "enabled"])
+      || typeof method.id !== "string" || !/^[a-z0-9_-]{2,40}$/.test(method.id)
+      || paymentIds.has(method.id)
       || typeof method.label !== "string" || !method.label.trim() || method.label.length > 60
-      || typeof method.enabled !== "boolean") fail("invalid-argument", "Forma de pagamento inválida.");
+      || typeof method.enabled !== "boolean"
+      || (method.instructions !== undefined && (typeof method.instructions !== "string"
+        || method.instructions.length > 500))) fail("invalid-argument", "Forma de pagamento inválida.");
+    paymentIds.add(method.id);
   }
   const tenantRef = db.doc(`tenants/${tenantId}`);
   await db.runTransaction(async (transaction) => {
@@ -740,8 +746,10 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
     requireCommercialFeature(tenant, "online_menu");
     requireCommercialFeature(tenant, "checkout");
     requireCommercialFeature(tenant, "web_orders");
-    const settings = settingsSnapshot.exists ? settingsSnapshot.data() : { deliveryFeeCents: 0, estimatedMinutes: 30, paymentMethods: [] };
-    const paymentMethod = settings.paymentMethods?.find((method) => method.id === paymentMethodId && method.enabled === true);
+    // Prices must be validated server-side even if an old or corrupted settings document bypassed the admin form.
+    const settings = projectPublicCheckoutSettings(settingsSnapshot.exists ? settingsSnapshot.data() : null);
+    if (!settings) fail("failed-precondition", "Configuração de checkout inválida. Solicite revisão à sorveteria.");
+    const paymentMethod = settings.paymentMethods.find((method) => method.id === paymentMethodId);
     if (!paymentMethod) fail("failed-precondition", "Forma de pagamento indisponível.");
     if (fulfillmentMode === "delivery") requireCommercialFeature(tenant, "simple_delivery");
     if (fulfillmentMode === "pickup") requireCommercialFeature(tenant, "pickup");

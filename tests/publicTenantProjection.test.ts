@@ -49,5 +49,6 @@ describe("public checkout settings projection",()=>{
   it("rejects invalid fee, minute or payment settings",()=>{
     expect(projectPublicCheckoutSettings({deliveryFeeCents:-1,estimatedMinutes:30,paymentMethods:[]})).toBeNull();
     expect(projectPublicCheckoutSettings({deliveryFeeCents:0,estimatedMinutes:NaN,paymentMethods:[]})).toBeNull();
+    expect(projectPublicCheckoutSettings({deliveryFeeCents:0,estimatedMinutes:30,paymentMethods:null})).toBeNull();
   });
 });

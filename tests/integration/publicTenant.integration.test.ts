@@ -38,6 +38,18 @@ describe("public storefront and checkout HTTPS isolation",()=>{
     expect(JSON.stringify(alpha)).not.toMatch(/createdAt|updatedAt|adminPassword|secret/);
     await expect(checkout("../tenant-beta")).rejects.toMatchObject({code:"functions/invalid-argument"});
   });
+  it("rejects invalid payment instructions and duplicate method IDs at the privileged write boundary",async()=>{
+    await signInWithEmailAndPassword(auth,"owner.alpha@demo.sorveteria.test","GelatoDev!2026");
+    const change=httpsCallable(functions,"updateTenantSettings");
+    const baseSettings={deliveryFeeCents:500,estimatedMinutes:35};
+    await expect(change({tenantId:"tenant-alpha",settings:{...baseSettings,
+      paymentMethods:[{id:"cash",label:"Dinheiro",enabled:true,instructions:{secret:"invalid"}}]}}))
+      .rejects.toMatchObject({code:"functions/invalid-argument"});
+    await expect(change({tenantId:"tenant-alpha",settings:{...baseSettings,
+      paymentMethods:[{id:"cash",label:"Dinheiro",enabled:true},{id:"cash",label:"Duplicado",enabled:true}]}}))
+      .rejects.toMatchObject({code:"functions/invalid-argument"});
+    await signOut(auth);
+  });
   it("protects raw tenant/settings from customers without blocking HTTPS",async()=>{
     await signInWithEmailAndPassword(auth,"customer.alpha@demo.sorveteria.test","GelatoDev!2026");
     await expect(getDoc(doc(db,"tenants/tenant-alpha"))).rejects.toMatchObject({code:"permission-denied"});
