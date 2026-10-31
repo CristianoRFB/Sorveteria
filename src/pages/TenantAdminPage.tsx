@@ -69,6 +69,7 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
   const scopedRole = membership?.tenantId === tenant.id ? membership.role : null;
   const canManage = isPlatformOwner || scopedRole === "tenant_owner" || scopedRole === "tenant_admin";
   const canReadSales = canUseTenantFeature(tenant,"basic_sales_summary");
+  const canUseKitchen = canUseTenantFeature(tenant, "kds");
   const [tab, setTab] = useState<Tab>("orders");
 
   return (
@@ -82,6 +83,7 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
         {canReadSales && <button role="tab" aria-selected={tab === "sales"} className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Resumo de vendas</button>}
         {canManage && <button role="tab" aria-selected={tab === "catalog"} className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>Catálogo</button>}
         {canManage && <button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>Checkout e equipe</button>}
+        {canUseKitchen && <Link to={`/${tenant.slug}/painel/cozinha`}>Cozinha (KDS)</Link>}
         <Link to={`/${tenant.slug}/painel/qr-codes`}>QR do cardápio</Link>
         <Link to={`/${tenant.slug}/cardapio`} target="_blank">Ver loja</Link>
       </div>
