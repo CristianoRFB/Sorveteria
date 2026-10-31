@@ -34,7 +34,9 @@ function calculateCouponDiscount(record,subtotalCents,nowMs=Date.now()){
     ||!Number.isSafeInteger(record.usedCount)||record.usedCount<0
     ||!Number.isFinite(nowMs))return null;
   let coupon;
-  try{coupon=validateCouponConfig(record);}catch{return null;}
+  try{coupon=validateCouponConfig({code:record.code,kind:record.kind,value:record.value,
+    minSubtotalCents:record.minSubtotalCents,maxUses:record.maxUses,
+    active:record.active,expiresAt:record.expiresAt});}catch{return null;}
   if(subtotalCents<coupon.minSubtotalCents
     ||(coupon.maxUses!==null&&record.usedCount>=coupon.maxUses)
     ||(coupon.expiresAt!==null&&nowMs>=Date.parse(coupon.expiresAt+"T00:00:00Z")+86400000))return null;
