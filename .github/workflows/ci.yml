@@ -1,0 +1,70 @@
+name: Sorveteria CI
+
+on:
+  push:
+    branches:
+      - 'codex/**'
+      - 'fix/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sorveteria-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Node 22 / Firebase Emulator / Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      FUNCTIONS_DISCOVERY_TIMEOUT: '180'
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Java 21 for Firebase Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Confirm runtime versions
+        run: |
+          node --version
+          npm --version
+          java -version
+          node -e "const r = require('./package.json'); const f = require('./functions/package.json'); if (!r.engines.node.includes('22') || f.engines.node !== '22') process.exit(1)"
+      - name: Install root dependencies from lockfile
+        run: npm ci --no-audit --no-fund
+      - name: Install Functions dependencies from lockfile
+        run: npm --prefix functions ci --no-audit --no-fund
+      - name: Unit tests (including entitlement boundary)
+        run: npm run test
+      - name: ESLint
+        run: npm run lint
+      - name: TypeScript and production build
+        run: npm run build
+      - name: Firestore and Storage rules (emulators)
+        run: npm run test:rules
+      - name: End-to-end callable integration (synthetic emulator tenants)
+        run: npm run test:integration
+      - name: Build technical diagrams
+        run: npm run docs:diagrams
+      - name: Validate documentation and link manifests
+        run: npm run docs:check
+      - name: Validate leads manifest (zero leads is valid)
+        run: npm run docs:leads
+      - name: Release preflight smoke check (expected BLOCKED until externally verified)
+        run: npm run release:preflight -- --environment production --allow-blocked
+      - name: Production dependency high/critical advisories
+        run: npm audit --omit=dev --audit-level=high
+      - name: Functions dependency high/critical advisories
+        run: npm --prefix functions audit --omit=dev --audit-level=high

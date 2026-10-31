@@ -1,8 +1,10 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { connectFirestoreEmulator, initializeFirestore } from "firebase/firestore";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
 import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
+import { hostedFirebaseConfigurationProblems } from "@/domain/firebaseDeploymentGuard";
+import { firestoreTransportSettings } from "@/domain/firestoreTransport";
 
 const configuredValues = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -15,6 +17,15 @@ const configuredValues = {
 
 export const firebaseConfigured = Object.values(configuredValues).every(Boolean);
 export const usingFirebaseEmulators = import.meta.env.VITE_USE_EMULATORS === "true";
+const unsafeHostedBuild = hostedFirebaseConfigurationProblems(
+  import.meta.env.PROD,
+  usingFirebaseEmulators,
+  configuredValues,
+);
+if (unsafeHostedBuild.length) {
+  throw new Error("Firebase bloqueado para build hospedado: " + unsafeHostedBuild.join(", "));
+}
+
 
 const firebaseConfig = {
   apiKey: configuredValues.apiKey || "demo-api-key",
@@ -27,7 +38,7 @@ const firebaseConfig = {
 
 export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
-export const db = getFirestore(firebaseApp);
+export const db = initializeFirestore(firebaseApp, firestoreTransportSettings(usingFirebaseEmulators));
 export const storage = getStorage(firebaseApp);
 export const functions = getFunctions(firebaseApp, "southamerica-east1");
 

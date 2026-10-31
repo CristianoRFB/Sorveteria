@@ -23,6 +23,7 @@
     "docs:diagrams": "node scripts/docs-diagrams.mjs",
     "docs:check": "node scripts/docs-check.mjs",
     "docs:leads": "node scripts/docs-leads.mjs",
+    "release:preflight": "node scripts/release-preflight.mjs",
     "qa:screenshots": "node scripts/capture-screenshots.mjs"
   },
   "dependencies": {
@@ -31,7 +32,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-router-dom": "^7.9.3",
-    "zod": "^4.1.11"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.37.0",
@@ -53,6 +54,7 @@
     "vitest": "^5.0.3"
   },
   "overrides": {
-    "@grpc/grpc-js": "^1.14.6"
+    "@grpc/grpc-js": "^1.14.6",
+    "re2js": "2.8.7"
   }
 }

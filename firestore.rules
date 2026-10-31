@@ -34,17 +34,6 @@ service cloud.firestore {
     function tenantAdmin(tenantId) {
       return hasRole(tenantId, ["tenant_owner", "tenant_admin"]);
     }
-    function tenantDriver(tenantId) { return hasRole(tenantId, ["driver"]); }
-    function tenantIsActive(tenantId) {
-      return exists(/databases/$(database)/documents/tenants/$(tenantId))
-        && get(/databases/$(database)/documents/tenants/$(tenantId)).data.status == "active";
-    }
-    function assignedDriver(tenantId, orderId) {
-      let deliveryPath = /databases/$(database)/documents/tenants/$(tenantId)/deliveries/$(orderId);
-      return tenantDriver(tenantId) && exists(deliveryPath)
-        && get(deliveryPath).data.driverId == request.auth.uid;
-    }
-
     match /users/{uid} {
       allow get: if signedIn() && request.auth.uid == uid || platformOwner();
       allow list: if platformOwner();
@@ -66,32 +55,39 @@ service cloud.firestore {
     }
 
     match /tenants/{tenantId} {
-      allow get: if platformOwner() || tenantStaff(tenantId) || tenantDriver(tenantId) || resource.data.status == "active";
-      allow list: if platformOwner() || resource.data.status == "active";
+      // Public storefront uses getPublicTenant HTTPS projection, never raw metadata.
+      // Full commercial tenant metadata is available only to managers.
+      // Staff, cashiers and drivers use scoped HTTPS projections.
+      allow get: if platformOwner() || tenantAdmin(tenantId);
+      allow list: if platformOwner();
       allow create, update, delete: if false;
 
       match /settings/{settingsId} {
-        allow get: if platformOwner() || tenantStaff(tenantId) || (tenantIsActive(tenantId) && settingsId == "main");
+        // Customer checkout uses getPublicCheckoutSettings HTTPS allowlist.
+        allow get: if platformOwner() || tenantAdmin(tenantId);
         allow list: if false;
         allow create, update, delete: if false;
       }
 
       match /categories/{categoryId} {
-        allow read: if platformOwner() || tenantStaff(tenantId) || (tenantIsActive(tenantId) && resource.data.active == true);
+        // Public storefront uses allowlisted getPublicCatalog HTTPS projection.
+        // Raw documents can contain administrative metadata.
+        allow read: if platformOwner() || tenantStaff(tenantId);
         allow create, update: if false;
         allow delete: if false;
       }
 
       match /products/{productId} {
-        allow read: if platformOwner() || tenantStaff(tenantId) || (tenantIsActive(tenantId) && resource.data.available == true);
+        // Reject unauthenticated direct reads; the public callable returns only safe fields.
+        allow read: if platformOwner() || tenantStaff(tenantId);
         allow create, update: if false;
         allow delete: if false;
       }
 
       match /orders/{orderId} {
+        // Drivers use getDriverAssignments HTTPS instead of raw order PII.
         allow get: if platformOwner() || tenantStaff(tenantId)
-          || (signedIn() && resource.data.customerId == request.auth.uid)
-          || assignedDriver(tenantId, orderId);
+          || (signedIn() && resource.data.customerId == request.auth.uid);
         allow list: if platformOwner() || tenantStaff(tenantId)
           || (signedIn() && resource.data.customerId == request.auth.uid);
         // Clientes nunca escrevem totais, estados operacionais nem códigos confiáveis.
@@ -100,14 +96,16 @@ service cloud.firestore {
       }
 
       match /publicOrderTracking/{publicCode} {
-        allow get: if tenantIsActive(tenantId)
-          && resource.data.publicCode == publicCode;
+        // A public code grants access only to the allowlisted HTTPS tracking projection.
+        // Raw documents may gain sensitive server fields and must remain private.
+        allow get: if platformOwner() || tenantStaff(tenantId);
         allow list, create, update, delete: if false;
       }
 
       match /deliveries/{deliveryId} {
-        allow get, list: if platformOwner() || tenantStaff(tenantId)
-          || (tenantDriver(tenantId) && resource.data.driverId == request.auth.uid);
+        // Raw records include confirmation hashes: never expose them to drivers.
+        // Driver UI reads only its backend-projected assignments via HTTPS callable.
+        allow get, list: if platformOwner() || tenantStaff(tenantId);
         allow create, update, delete: if false;
       }
 

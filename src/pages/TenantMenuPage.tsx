@@ -9,6 +9,17 @@ import { canUseTenantFeature, featureAccessMessage } from "@/domain/entitlements
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 
+/** Product images are optional. Preserve a usable catalogue when a CDN asset fails. */
+function ProductArtwork({product}:{product:CatalogProduct}) {
+  const [failed,setFailed]=useState(false);
+  if(product.imageUrl && !failed) return <img className="product-photo" src={product.imageUrl}
+    alt={`Foto de ${product.name}`} loading="lazy" decoding="async" referrerPolicy="no-referrer"
+    onError={()=>setFailed(true)} />;
+  return <div className={`product-art product-art-${product.kind}`} aria-hidden="true">
+    <span>{product.kind==="cone"?"◒":product.kind==="milkshake"?"◒":"◉"}</span>
+  </div>;
+}
+
 function money(cents: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 }
@@ -83,7 +94,7 @@ export function TenantMenuPage() {
     {error && <ErrorState message={error} />}
     {categories.length > 0 && <nav className="category-chips" aria-label="Categorias"><button className={activeCategory === "all" ? "selected" : ""} onClick={() => setActiveCategory("all")}>Tudo</button>{categories.map((category) => <button className={activeCategory === category.id ? "selected" : ""} key={category.id} onClick={() => setActiveCategory(category.id)}>{category.name}</button>)}</nav>}
     {products.length === 0 ? <section className="empty-state"><h2>Cardápio em preparo</h2><p>A loja ainda não publicou produtos. Volte mais tarde.</p></section> : visibleProducts.length === 0 ? <div className="empty-state">Nenhum produto disponível nesta categoria.</div> : <section className="menu-product-grid" aria-label="Produtos">{visibleProducts.map((product) => <article className="menu-product-card" key={product.id}>
-      <div className={`product-art product-art-${product.kind}`} aria-hidden="true"><span>{product.kind === "cone" ? "◒" : product.kind === "milkshake" ? "◒" : "◉"}</span></div>
+      <ProductArtwork product={product} />
       <div className="menu-product-details"><span className="category-label">{categories.find((category) => category.id === product.categoryId)?.name}</span><h2>{product.name}</h2><p>{product.description || "Preparado na hora com os sabores da casa."}</p><div className="product-card-footer"><strong>{money(product.priceCents)}</strong><button className="button primary" disabled={!canOrder} onClick={() => openProduct(product)}>{product.optionGroups.length ? "Personalizar" : "Adicionar"}</button></div></div>
     </article>)}</section>}
     {selectedProduct && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedProduct(null); }}>

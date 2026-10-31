@@ -3,18 +3,22 @@ import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createQaNetworkTrace } from "./lib/qaNetworkTrace.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outputDir = path.join(root, "docs/versions/v06-multitenant-core-ready/screenshots");
+const outputDir = process.env.SORVETERIA_QA_OUTPUT_DIR
+  ? path.resolve(root, process.env.SORVETERIA_QA_OUTPUT_DIR)
+  : path.join(root, "docs/versions/v06-multitenant-core-ready/screenshots");
 const baseUrl = "http://127.0.0.1:5173";
-const cdp = "http://127.0.0.1:9333";
-const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+const cdpPort = process.env.SORVETERIA_QA_CDP_PORT || "9333";
+const cdp = "http://127.0.0.1:" + cdpPort;
+const edge = process.env.SORVETERIA_QA_BROWSER || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const profileDir = path.join(os.tmpdir(), `sorveteria-doc-qa-${process.pid}`);
 const password = "GelatoDev!2026";
 let browser;
 let ws;
 let send;
-let networkTrace = [];
+const networkTrace = createQaNetworkTrace();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitUntil(fn, label, timeout = 20000) {
@@ -48,13 +52,7 @@ function connectDebugger(wsUrl) {
   ws.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
     if (!message.id) {
-      if (message.method === "Network.requestWillBeSent" && String(message.params?.request?.url).includes(":5001/")) {
-        networkTrace.push({ event: "request", url: message.params.request.url, method: message.params.request.method });
-      } else if (message.method === "Network.responseReceived" && String(message.params?.response?.url).includes(":5001/")) {
-        networkTrace.push({ event: "response", url: message.params.response.url, status: message.params.response.status, headers: message.params.response.headers });
-      } else if (message.method === "Network.loadingFailed") {
-        networkTrace.push({ event: "failed", requestId: message.params?.requestId, error: message.params?.errorText, reason: message.params?.blockedReason, cors: message.params?.corsErrorStatus });
-      }
+      networkTrace.observe(message.method, message.params);
       return;
     }
     const waiter = pending.get(message.id);
@@ -172,17 +170,31 @@ async function capture(name, mobile = false) {
 }
 
 async function clearOrigin() {
+  // Unload the old page before resetting browser state, so active Firebase
+  // listeners cannot write the former session back during the reset.
+  await send("Page.navigate", { url: "about:blank" });
+  await waitUntil(async () => await evaluate("location.href === 'about:blank'"), "aba vazia", 20000);
   await send("Storage.clearDataForOrigin", { origin: baseUrl, storageTypes: "all" });
-  await sleep(300);
   await navigate(`/?qa-reset=${Date.now()}`);
-  await waitUntil(async () => await evaluate("(async () => { const request = indexedDB.open('firebaseLocalStorageDb'); const database = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); if (!database.objectStoreNames.contains('firebaseLocalStorage')) return true; const store = database.transaction('firebaseLocalStorage').objectStore('firebaseLocalStorage'); const query = store.getAll(); const rows = await new Promise((resolve, reject) => { query.onsuccess = () => resolve(query.result); query.onerror = () => reject(query.error); }); return rows.length === 0; })()"), "limpeza da sessão Auth", 15000);
+  // Verify the Firebase SDK's actual identity after a full page navigation.
+  // Opening IndexedDB manually can block indefinitely while Chrome is clearing
+  // it; an Auth-ready check detects any identity leak without that race.
+  await waitUntil(async () => await evaluate(`(async () => {
+    try {
+      const { auth } = await import('/src/lib/firebase.ts');
+      return await Promise.race([
+        auth.authStateReady().then(() => auth.currentUser === null),
+        new Promise((resolve) => setTimeout(() => resolve(false), 1500))
+      ]);
+    } catch { return false; }
+  })()`), "Firebase Auth sem sessão anterior", 20000);
 }
 
 try {
   await mkdir(outputDir, { recursive: true });
   browser = spawn(edge, [
     "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
-    "--remote-allow-origins=*", "--remote-debugging-port=9333", `--user-data-dir=${profileDir}`,
+    "--remote-allow-origins=*", "--remote-debugging-port=" + cdpPort, `--user-data-dir=${profileDir}`,
     `${baseUrl}/`,
   ], { stdio: "ignore", windowsHide: true });
 
@@ -271,7 +283,7 @@ try {
     await waitUntil(async () => await evaluate("Boolean(document.querySelector('.code-panel strong'))"), "confirmação do pedido", 120000);
   } catch (error) {
     console.error(`Estado do checkout após enviar: ${await evaluate("document.body?.innerText?.slice(-900) || ''")}`);
-    console.error(`Rede Functions: ${JSON.stringify(networkTrace.slice(-30))}`);
+    console.error(`Rede Functions: ${JSON.stringify(networkTrace.events().slice(-30))}`);
     throw error;
   }
   const publicCode = await evaluate("document.querySelector('.code-panel strong')?.textContent?.trim() || ''");
@@ -279,8 +291,9 @@ try {
   if (!publicCode || !deliveryCode) throw new Error("A confirmação do pedido não mostrou os códigos esperados.");
   await capture("confirmacao-pedido.png");
   await navigate(`/tenant-alpha/acompanhar?code=${encodeURIComponent(publicCode)}`);
-  await clickButton("Ver pedido");
-  await waitText("Pedido recebido");
+  // Query runs automatically when ?code= is present; the submit button is disabled while loading.
+  // Clicking it during "Consultando..." is a test race, not a storefront failure.
+  await waitText("Pedido recebido", 45000);
   await capture("tracking-pedido.png");
 
   await clearOrigin();
@@ -299,9 +312,18 @@ try {
   await setOrderSelect(publicCode, "select[aria-label=Entregador]", "driver-alpha");
   await clickOrderButton(publicCode, "Atribuir entrega");
   await waitText("Aguardando entregador", 20000);
+  // Essential-tier sales summary must be readable without exposing order/customer PII.
+  // This is a browser assertion, not a screenshot: retain the established 22 images/round.
+  await clickButton("Resumo de vendas", "[role=tab]");
+  await waitText("Resumo de pedidos");
+  await waitUntil(async () => await evaluate("Boolean(document.querySelector('.sales-summary-grid') && document.body.innerText.includes('Pedidos recebidos'))"), "Resumo de vendas", 30000);
   await clickButton("Catálogo", "[role=tab]");
   await waitText("Catálogo da loja");
   await capture("tenant-owner-catalogo.png");
+  // Essential is intentionally not entitled to KDS; neither the route nor the backend
+  // may disclose kitchen tickets for a lower-tier tenant.
+  await navigate("/tenant-alpha/painel/cozinha");
+  await waitText("Este recurso não está incluído no plano atual.", 30000);
 
   await clearOrigin();
   await login("driver.alpha@demo.sorveteria.test", "/tenant-alpha/painel/entregas");
@@ -355,6 +377,21 @@ try {
   await capture("platform-owner-tenant-reativado.png");
   console.log(`QA de navegador concluído para o pedido ${publicCode}: criação, tracking, operação do owner, entrega, RBAC e ciclo do Platform Owner.`);
   }
+} catch (error) {
+  // Store diagnostics without URL, headers, order details or tokens.
+  try {
+    const dir = path.join(root, ".qa");
+    await mkdir(dir, {recursive:true});
+    const file = path.join(dir, "qa-failure-" + Date.now() + ".json");
+    await writeFile(file, JSON.stringify({
+      at: new Date().toISOString(),
+      category: /timeout/i.test(String(error)) ? "timeout" : "qa-failure",
+      summary: networkTrace.summary(),
+      network: networkTrace.events().slice(-200),
+    }, null, 2));
+    console.error("QA: diagnóstico de rede redigido salvo em " + file);
+  } catch { /* never mask original QA error */ }
+  throw error;
 } finally {
   try { await send("Browser.close"); } catch { /* browser may already be closing */ }
   try { ws.close(); } catch { /* already closed */ }

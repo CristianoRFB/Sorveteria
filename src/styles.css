@@ -236,3 +236,56 @@ label { display: grid; gap: 8px; color: #51475d; font-size: .9rem; font-weight: 
   .team-row > span:not(.status-pill) { grid-column: 1; }
   .team-form { grid-template-columns: 1fr; }
 }
+
+
+/* White-label colors extend to all tenant routes; platform marketing stays unchanged. */
+.tenant-scope { min-height: 100vh; background: var(--tenant-bg, #fffaf3); color: var(--tenant-text, #201a2a); }
+.tenant-scope .button { border-radius: var(--tenant-radius, 20px); }
+.tenant-scope .primary { background: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope .secondary { background: var(--tenant-secondary, #f1e9ff); }
+.tenant-scope .eyebrow, .tenant-scope .text-button { color: var(--tenant-primary, #6d28d9); }
+.tenant-scope .category-chips button.selected { background: var(--tenant-primary, #6d28d9); border-color: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope .cart-button span { background: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope button:focus-visible, .tenant-scope a:focus-visible, .tenant-scope input:focus-visible { outline-color: var(--tenant-primary, #6d28d9); }
+
+/* Real catalog photos with a stable fallback for missing or unreachable assets. */
+.product-photo { display: block; width: 100%; height: 150px; object-fit: cover; background: #f1e9ff; }
+
+/* Basic order summary: discrete metrics, no personally identifying data. */
+.sales-summary-controls { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+.sales-summary-controls label { min-width:180px; }
+.sales-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:20px 0; }
+.sales-summary-metric { display:grid; align-content:center; gap:8px; min-height:105px;
+  background:#fff; border:1px solid #eadff0; border-radius:16px; padding:16px; }
+.sales-summary-metric span { font-size:.85rem; color:#51475d; font-weight:650; }
+.sales-summary-metric strong { font-size:clamp(1.2rem,3vw,1.8rem); font-variant-numeric:tabular-nums; }
+@media (max-width:640px) {
+  .sales-summary-controls { width:100%; }
+  .sales-summary-controls label { flex:1; }
+  .sales-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+
+
+/* Pro/Premium Kitchen Display System: responsive, readable from a countertop display. */
+.kitchen-page { max-width: 1500px; }
+.kitchen-page > .section-heading { align-items:flex-start; }
+.kitchen-page h1 { font-size:clamp(2rem,4vw,3.2rem); margin:8px 0 12px; }
+.kitchen-columns { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-top:22px; align-items:start; }
+.kitchen-column { background:#f4eff8; border:1px solid #e6dced; border-radius:20px; padding:12px; min-width:0; }
+.kitchen-column h2 { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 4px 14px; font-size:1.13rem; }
+.kitchen-column-cards { display:grid; gap:12px; }
+.kitchen-ticket { display:grid; gap:16px; border:1px solid #e5dced; padding:16px; background:#fff; border-radius:16px; box-shadow:0 8px 24px rgba(35,20,45,.05); }
+.kitchen-ticket-heading { display:flex; gap:10px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
+.kitchen-ticket-heading div { display:grid; gap:5px; }
+.kitchen-ticket-heading strong { font-size:1.07rem; font-variant-numeric:tabular-nums; }
+.kitchen-ticket-heading div span { color:#51475d; font-size:.8rem; }
+.kitchen-ticket-items { display:grid; gap:12px; list-style:none; margin:0; padding:0; }
+.kitchen-ticket-items li { display:grid; gap:4px; border-top:1px solid #f0ebf3; padding-top:9px; }
+.kitchen-ticket-items small { color:#51475d; line-height:1.5; overflow-wrap:anywhere; }
+.kitchen-ticket .button { min-height:48px; font-size:.95rem; }
+@media(max-width:1100px){ .kitchen-columns { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:640px){
+  .kitchen-page > .section-heading { flex-direction:column; }
+  .kitchen-columns { grid-template-columns:1fr; }
+  .kitchen-column-cards { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+}

@@ -2,22 +2,25 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import type { CatalogCategory, CatalogProduct } from "@/domain/catalog";
 import type { Order, OrderStatus } from "@/domain/order";
+import type { Tenant } from "@/domain/tenant";
 import { useTenant } from "@/hooks/useTenant";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantMembership } from "@/hooks/useTenantMembership";
 import { listCatalog, saveCategory, saveProduct } from "@/services/catalogService";
 import { assignDelivery, changeOrderStatus, resetDeliveryConfirmationCode } from "@/services/orderService";
-import { addTenantMember, setTenantMemberStatus, watchDrivers, watchOrders, watchTenantDeliveries, watchTenantMembers, type DriverDelivery } from "@/services/tenantOperations";
+import { addTenantMember, setTenantMemberStatus, watchTenantOperations, watchTenantMembers, type DriverDelivery } from "@/services/tenantOperations";
 import type { Membership } from "@/domain/membership";
 import { loadTenantSettings, saveTenantSettings, type TenantSettings } from "@/services/tenantSettings";
 import { LoadingState } from "@/components/LoadingState";
+import { SalesSummaryPanel } from "@/components/SalesSummaryPanel";
+import { canUseTenantFeature } from "@/domain/entitlements";
 
-type Tab = "orders" | "catalog" | "settings";
+type Tab = "orders" | "catalog" | "settings" | "sales";
 type OptionDraft = { id: string; name: string; priceDeltaCents: number; available: boolean };
 type GroupDraft = { id: string; name: string; required: boolean; minSelections: number; maxSelections: number; options: OptionDraft[] };
-type ProductDraft = { name: string; description: string; categoryId: string; kind: CatalogProduct["kind"]; price: string; available: boolean; optionGroups: GroupDraft[] };
+type ProductDraft = { name: string; description: string; imageUrl: string; categoryId: string; kind: CatalogProduct["kind"]; price: string; available: boolean; optionGroups: GroupDraft[] };
 
-const emptyProduct: ProductDraft = { name: "", description: "", categoryId: "", kind: "pot", price: "", available: true, optionGroups: [] };
+const emptyProduct: ProductDraft = { name: "", description: "", imageUrl: "", categoryId: "", kind: "pot", price: "", available: true, optionGroups: [] };
 const orderLabels: Record<OrderStatus, string> = {
   received: "Recebido", confirmed: "Confirmado", preparing: "Em preparo", ready: "Pronto",
   awaiting_driver: "Aguardando entregador", out_for_delivery: "Saiu para entrega", ready_for_pickup: "Pronto para retirada",
@@ -41,6 +44,7 @@ function toProductDraft(product: CatalogProduct, categories: CatalogCategory[]):
   return {
     name: product.name,
     description: product.description,
+    imageUrl: product.imageUrl || "",
     categoryId: product.categoryId || categories[0]?.id || "",
     kind: product.kind,
     price: (product.priceCents / 100).toFixed(2).replace(".", ","),
@@ -51,11 +55,22 @@ function toProductDraft(product: CatalogProduct, categories: CatalogCategory[]):
 
 export function TenantAdminPage() {
   const { tenant } = useTenant();
+  if (!tenant) return <LoadingState label="Carregando sorveteria..." />;
+
+  // Remount the full tenant-scoped admin tree on context changes: never reuse
+  // an Alpha order, membership, selected driver or catalog draft under Beta.
+  return <TenantAdminView key={tenant.id} tenant={tenant} />;
+}
+
+function TenantAdminView({ tenant }: { tenant: Tenant }) {
   const { isPlatformOwner } = useAuth();
   const { membership } = useTenantMembership();
-  const canManage = isPlatformOwner || membership?.role === "tenant_owner" || membership?.role === "tenant_admin";
+  // A membership returned by a hook must always belong to the active tenant.
+  const scopedRole = membership?.tenantId === tenant.id ? membership.role : null;
+  const canManage = isPlatformOwner || scopedRole === "tenant_owner" || scopedRole === "tenant_admin";
+  const canReadSales = canUseTenantFeature(tenant,"basic_sales_summary");
+  const canUseKitchen = canUseTenantFeature(tenant, "kds");
   const [tab, setTab] = useState<Tab>("orders");
-  if (!tenant) return <LoadingState label="Carregando sorveteria..." />;
 
   return (
     <main className="content admin-content">
@@ -65,12 +80,15 @@ export function TenantAdminPage() {
       <p className="muted">Pedidos, catálogo e configurações da sua sorveteria.</p>
       <div className="admin-nav" role="tablist" aria-label="Seções do painel">
         <button role="tab" aria-selected={tab === "orders"} className={tab === "orders" ? "active" : ""} onClick={() => setTab("orders")}>Pedidos</button>
+        {canReadSales && <button role="tab" aria-selected={tab === "sales"} className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Resumo de vendas</button>}
         {canManage && <button role="tab" aria-selected={tab === "catalog"} className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>Catálogo</button>}
         {canManage && <button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>Checkout e equipe</button>}
+        {canUseKitchen && <Link to={`/${tenant.slug}/painel/cozinha`}>Cozinha (KDS)</Link>}
         <Link to={`/${tenant.slug}/painel/qr-codes`}>QR do cardápio</Link>
         <Link to={`/${tenant.slug}/cardapio`} target="_blank">Ver loja</Link>
       </div>
-      {(!canManage || tab === "orders") && <OrderManager tenantId={tenant.id} canResetDeliveryCode={isPlatformOwner || membership?.role === "tenant_owner"} />}
+      {(!canManage || tab === "orders") && <OrderManager tenantId={tenant.id} canResetDeliveryCode={isPlatformOwner || scopedRole === "tenant_owner"} />}
+      {canReadSales && tab === "sales" && <SalesSummaryPanel tenantId={tenant.id} />}
       {canManage && tab === "catalog" && <CatalogManager tenantId={tenant.id} />}
       {tab === "settings" && canManage && <><SettingsEditor tenantId={tenant.id} /><TeamManager tenantId={tenant.id} /></>}
     </main>
@@ -145,7 +163,7 @@ function CatalogManager({ tenantId }: { tenantId: string }) {
     try {
       const priceCents = Math.round(Number(draft.price.replace(",", ".")) * 100);
       const input = {
-        name: draft.name, description: draft.description, categoryId: draft.categoryId, kind: draft.kind,
+        name: draft.name, description: draft.description, imageUrl: draft.imageUrl.trim(), categoryId: draft.categoryId, kind: draft.kind,
         priceCents, available: draft.available, optionGroups: draft.optionGroups,
       };
       await saveProduct(tenantId, input, editingId);
@@ -181,6 +199,8 @@ function CatalogManager({ tenantId }: { tenantId: string }) {
         <form className="form-grid" onSubmit={(event) => void submitProduct(event)}>
           <label>Nome<input required maxLength={120} value={draft.name} onChange={(event) => changeDraft("name", event.target.value)} /></label>
           <label>Descrição<textarea maxLength={1000} rows={2} value={draft.description} onChange={(event) => changeDraft("description", event.target.value)} /></label>
+          <label>Imagem do produto (URL HTTPS, opcional)<input type="url" maxLength={2048} placeholder="https://exemplo.com/imagens/sorvete.webp" value={draft.imageUrl} onChange={(event) => changeDraft("imageUrl", event.target.value)} /></label>
+          <p className="form-hint">Use uma imagem HTTPS de sua autoria ou licenciada. Deixe vazio para remover a foto e mostrar a ilustração padrão.</p>
           <div className="form-row">
             <label>Categoria<select required value={draft.categoryId} onChange={(event) => changeDraft("categoryId", event.target.value)}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label>Tipo<select value={draft.kind} onChange={(event) => changeDraft("kind", event.target.value as CatalogProduct["kind"])}><option value="pot">Pote</option><option value="cone">Casquinha</option><option value="milkshake">Milkshake</option><option value="other">Outro</option></select></label>
@@ -242,9 +262,13 @@ function OrderManager({ tenantId, canResetDeliveryCode }: { tenantId: string; ca
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => watchOrders(tenantId, (rows) => { setOrders(rows); setLoading(false); setError(null); }, (watchError) => { setError(watchError.message); setLoading(false); }), [tenantId]);
-  useEffect(() => watchDrivers(tenantId, setDrivers, (watchError) => setError(watchError.message)), [tenantId]);
-  useEffect(() => watchTenantDeliveries(tenantId, setDeliveries, (watchError) => setError(watchError.message)), [tenantId]);
+  useEffect(() => watchTenantOperations(tenantId, (snapshot) => {
+    setOrders(snapshot.orders);
+    setDrivers(snapshot.drivers);
+    setDeliveries(snapshot.deliveries);
+    setLoading(false);
+    setError(null);
+  }, (watchError) => { setError(watchError.message); setLoading(false); }), [tenantId]);
 
   async function transition(order: Order, status: OrderStatus) {
     const reason = status === "cancelled" ? window.prompt("Motivo do cancelamento:")?.trim() : undefined;
@@ -340,7 +364,7 @@ function SettingsEditor({ tenantId }: { tenantId: string }) {
     <span className="eyebrow">Checkout essencial</span><h2>Entrega, estimativa e pagamento</h2>
     <form className="form-grid settings-form" onSubmit={(event) => void save(event)}>
       <div className="form-row"><label>Taxa de entrega (R$)<input inputMode="decimal" value={(settings.deliveryFeeCents / 100).toFixed(2).replace(".", ",")} onChange={(event) => change("deliveryFeeCents", Math.max(0, Math.round(Number(event.target.value.replace(",", ".")) * 100) || 0))} /></label><label>Estimativa (minutos)<input type="number" min={1} max={600} value={settings.estimatedMinutes} onChange={(event) => change("estimatedMinutes", Number(event.target.value))} /></label></div>
-      <div className="payment-method-list"><h3>Formas de pagamento aceitas</h3>{settings.paymentMethods.map((method, index) => <div className="payment-method-row" key={method.id}><label className="checkbox-label"><input type="checkbox" checked={method.enabled} onChange={(event) => change("paymentMethods", settings.paymentMethods.map((item, i) => i === index ? { ...item, enabled: event.target.checked } : item))} />{method.label}</label><input aria-label={`Instruções para ${method.label}`} placeholder="Instruções opcionais" value={method.instructions || ""} onChange={(event) => change("paymentMethods", settings.paymentMethods.map((item, i) => i === index ? { ...item, instructions: event.target.value } : item))} /></div>)}</div>
+      <div className="payment-method-list"><h3>Formas de pagamento aceitas</h3>{settings.paymentMethods.map((method, index) => <div className="payment-method-row" key={method.id}><label className="checkbox-label"><input type="checkbox" checked={method.enabled} onChange={(event) => change("paymentMethods", settings.paymentMethods.map((item, i) => i === index ? { ...item, enabled: event.target.checked } : item))} />{method.label}</label><input aria-label={`Instruções para ${method.label}`} maxLength={500} placeholder="Instruções opcionais" value={method.instructions || ""} onChange={(event) => change("paymentMethods", settings.paymentMethods.map((item, i) => i === index ? { ...item, instructions: event.target.value } : item))} /></div>)}</div>
       {error && <p role="alert" className="error-text">{error}</p>}{message && <p role="status" className="notice">{message}</p>}
       <button className="button primary" disabled={pending}>{pending ? "Salvando..." : "Salvar configurações"}</button>
     </form>

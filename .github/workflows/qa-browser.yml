@@ -1,0 +1,154 @@
+name: Sorveteria Browser QA (demo emulator only)
+on:
+  push:
+    branches: ['codex/**']
+    paths:
+      - '.github/workflows/qa-browser.yml'
+      - 'scripts/capture-screenshots.mjs'
+      - 'scripts/lib/qaNetworkTrace.mjs'
+      - 'src/pages/TenantTrackingPage.tsx'
+      - 'src/App.tsx'
+      - 'src/styles.css'
+      - 'src/domain/tenantTheme.ts'
+      - 'src/services/orderService.ts'
+      - 'src/services/tenantOperations.ts'
+      - 'src/services/catalogService.ts'
+      - 'src/services/tenantResolver.ts'
+      - 'src/services/tenantSettings.ts'
+      - 'src/pages/CheckoutPage.tsx'
+      - 'src/pages/TenantMenuPage.tsx'
+      - 'functions/domain/public-tenant.cjs'
+      - 'src/pages/TenantAdminPage.tsx'
+      - 'src/pages/TenantKitchenPage.tsx'
+      - 'src/services/kitchenService.ts'
+      - 'functions/domain/kitchen-ticket.cjs'
+      - 'src/components/SalesSummaryPanel.tsx'
+      - 'src/services/salesSummaryService.ts'
+      - 'functions/domain/sales-summary.cjs'
+      - 'functions/domain/feature-availability.json'
+      - 'firestore.indexes.json'
+      - 'src/pages/DriverPage.tsx'
+      - 'functions/index.js'
+      - 'functions/domain/driver-assignment-projection.cjs'
+      - 'functions/domain/public-tracking.cjs'
+      - 'functions/domain/public-catalog.cjs'
+      - 'functions/domain/membership.cjs'
+      - 'firestore.rules'
+      - 'src/lib/firebase.ts'
+      - 'src/domain/firestoreTransport.ts'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sorveteria-browser-qa-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser-emulator-qa:
+    name: Browser E2E with Alpha/Beta synthetic tenants
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CI: 'true'
+      FUNCTIONS_DISCOVERY_TIMEOUT: '180'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install dependencies
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix functions ci --no-audit --no-fund
+      - name: Check Chrome installation
+        run: |
+          command -v google-chrome
+          google-chrome --version
+      - name: Start demo Firebase Emulator Suite
+        run: |
+          set -euo pipefail
+          nohup npm run emulators > /tmp/sorv-emulators.log 2>&1 &
+          ready=0
+          for i in $(seq 1 120); do
+            if curl --silent --fail http://127.0.0.1:4415/emulators | grep -q '"functions"'; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            tail -n 100 /tmp/sorv-emulators.log
+            exit 1
+          fi
+          sleep 5
+      - name: Wait for Auth and Firestore listeners (hub alone is not ready)
+        run: |
+          set -euo pipefail
+          ready=0
+          for i in $(seq 1 120); do
+            if curl --silent --max-time 2 --output /dev/null http://127.0.0.1:9099/ && curl --silent --max-time 2 --output /dev/null http://127.0.0.1:8088/; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            tail -n 120 /tmp/sorv-emulators.log
+            exit 1
+          fi
+      - name: Seed emulator-only Alpha/Beta accounts
+        env:
+          GCLOUD_PROJECT: demo-sorveteria
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8088
+          SORVETERIA_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          SORVETERIA_FIRESTORE_EMULATOR_HOST: 127.0.0.1:8088
+        run: npm run seed:emulator
+      - name: Start local Vite with demo configuration
+        run: |
+          set -euo pipefail
+          nohup npm run dev:emulator > /tmp/sorv-vite.log 2>&1 &
+          ready=0
+          for i in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:5173/ > /dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            tail -n 100 /tmp/sorv-vite.log
+            exit 1
+          fi
+      - name: Three complete browser journeys (fresh browser session per run)
+        env:
+          SORVETERIA_QA_BROWSER: /usr/bin/google-chrome
+          SORVETERIA_QA_CDP_PORT: '9333'
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "::group::Sorveteria E2E round ${attempt}/3"
+            SORVETERIA_QA_OUTPUT_DIR=".qa/screenshots/attempt-${attempt}" npm run qa:screenshots
+            actual=$(find ".qa/screenshots/attempt-${attempt}" -maxdepth 1 -type f -name '*.png' | wc -l)
+            if [ "$actual" -ne 22 ]; then
+              echo "::error::Round ${attempt}: expected 22 freshly generated screenshots; got ${actual}"
+              exit 1
+            fi
+            echo "::notice::Round ${attempt}: 22 screenshots, customer→driver→platform flow passed"
+            echo "::endgroup::"
+          done
+      - name: Upload only synthetic screenshots and sanitized QA diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sorv-browser-qa-${{ github.run_id }}
+          path: |
+            .qa/screenshots/**/*.png
+            .qa/*.json
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7

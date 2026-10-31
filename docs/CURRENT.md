@@ -1,19 +1,40 @@
 # CURRENT
 
-Versão canônica do estado técnico executável:
+## Baseline histórica executável
 
-`docs/versions/v06-multitenant-core-ready/`
+`docs/versions/v06-multitenant-core-ready/` mantém a evidência **histórica** do Core v06 (não deve ser reescrita).
 
-## Estado
+## Implementação atual — GOAL MASTER (branch, ainda sem go-live)
 
-- `CORE_READINESS=READY_FOR_GLOBAL_STANDARD_IMPLEMENTATION`
-- `GLOBAL_STANDARD_IMPLEMENTATION=NOT_STARTED`
-- `BILLING=NOT_IMPLEMENTED`
+- `CORE_READINESS=PASS_V06`
+- `GLOBAL_STANDARD_IMPLEMENTATION=IMPLEMENTED_IN_DEVELOPMENT_BRANCH`
+- `CHECKOUT_CONCURRENCY=PASS_FIREBASE_EMULATOR`
+- `PUBLIC_CATALOG=HTTPS_ALLOWLISTED_EMULATOR_TESTED_RAW_PUBLIC_FIRESTORE_READS_DENIED`
+- `PUBLIC_TENANT=HTTPS_ALLOWLISTED_RAW_TENANT_DOCS_MANAGERS_ONLY`
+- `PUBLIC_CHECKOUT_SETTINGS=HTTPS_ALLOWLISTED_RAW_SETTINGS_MANAGERS_ONLY`
+- `PUBLIC_TRACKING=HTTPS_ALLOWLISTED_RAW_TRACKING_DOCS_PRIVATE`
+- `PUBLIC_PRODUCT_IMAGES=HTTPS_LAZY_LOADING_WITH_FALLBACK_ADMIN_URL_EDIT_AND_CLEAR`
+- `BASIC_SALES_SUMMARY=7_30_DAY_INDEXED_HTTPS_AGGREGATES_RBAC_EMULATOR_TESTED`
+- `PLANNED_FEATURES_COVERAGE=18_OF_34_IMPLEMENTED`
+- `KDS=PRO_PREMIUM_HTTPS_PROJECTION_TESTED_4_STATUS_COLUMNS`
+- `WHITE_LABEL=SCOPED_ACROSS_STORE_AND_CHECKOUT`
+- `DRIVER_ASSIGNMENTS=HTTPS_SCOPED_EMULATOR_TESTED_RAW_DRIVER_FIRESTORE_READS_DENIED`
+- `DRIVER_FIRESTORE_INDEX=DRIVER_ID_UPDATED_AT_PRESENT`
+- `CI_UNIT_RULES_INTEGRATION=131_13_34_PASS_AT_396dc629`
+- `BROWSER_QA=THREE_CONSECUTIVE_FULL_SYNTHETIC_RUNS_PASS_66_REAL_SCREENSHOTS`
+- `TRACKING_RESILIENCE=PUBLIC_CALLABLE_AND_EMULATOR_LONG_POLLING_THREE_EMULATOR_BROWSER_JOURNEYS_PASS`
+- `STAGING=NOT_PROVISIONED_NOT_AUTHORIZED`
 - `PRODUCTION_DEPLOYMENT=NOT_PERFORMED`
+- `BILLING=NOT_IMPLEMENTED`
 - `LEADS_CONFIRMED=0`
+- `GENERAL_READINESS_ESTIMATE=92_PERCENT_UNVERIFIED_STAGING`
+- `LATEST_GREEN_CODE_SHA=396dc629ec074dca42a2cb44dcebe1f9e7a2ea3e`
+- `LATEST_CODE_BROWSER_QA=PENDING_RETEST_AT_393d2a9b`
+
+Branch em execução: `codex/goal-master-sorveteria-production-readiness`. Fonte do progresso verificável: [GOAL MASTER](GOAL_MASTER_EXECUTION.md). Scripts e bloqueios de release: [RELEASE PREFLIGHT](RELEASE_PREFLIGHT.md).
 
 ## Fonte comercial aprovada
 
-`docs/versions/v05-global-consolidation-ready/` permanece a fonte de verdade para preços, planos, limites e matriz comercial. A implementação v06 preserva essas decisões sem enforcement comercial.
+`docs/versions/v05-global-consolidation-ready/` continua sendo a fonte de verdade para valores, limites e decisões de planos. Não alterar a matriz comercial sem nova aprovação.
 
-Versões anteriores permanecem como histórico; não iniciar o Global Standard v01 automaticamente.
+**A CI verde em emuladores não significa que staging ou produção foram homologados.**

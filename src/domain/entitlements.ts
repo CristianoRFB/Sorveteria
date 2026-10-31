@@ -22,7 +22,9 @@ export type FeatureAccess = { allowed: boolean; reason: string | null };
 
 export function evaluateTenantFeature(tenant: Tenant | null, feature: string, nowMs = Date.now()): FeatureAccess {
   if (!tenant || tenant.status !== "active") return { allowed: false, reason: "tenant-inactive" };
-  const plan = tenant.planId ? planCatalog.plans[tenant.planId] : null;
+  const plan = tenant.planId && Object.hasOwn(planCatalog.plans, tenant.planId)
+    ? planCatalog.plans[tenant.planId]
+    : null;
   if (!plan || !tenant.subscriptionStatus) return { allowed: false, reason: "plan-unassigned" };
   if (tenant.subscriptionStatus === "demo") {
     if (tenant.planId !== "premium" || !usingFirebaseEmulators) return { allowed: false, reason: "demo-unavailable" };
@@ -30,9 +32,14 @@ export function evaluateTenantFeature(tenant: Tenant | null, feature: string, no
     if (tenant.planId !== planCatalog.trial.planId) return { allowed: false, reason: "invalid-trial" };
     const until = timestampMillis(tenant.trialUntil);
     if (!Number.isFinite(until)) return { allowed: false, reason: "invalid-trial" };
-    if (nowMs >= until) return { allowed: false, reason: "trial-expired" };
+    if (!Number.isFinite(nowMs) || nowMs >= until) return { allowed: false, reason: "trial-expired" };
   } else if (!["active", "past_due"].includes(tenant.subscriptionStatus)) {
-    return { allowed: false, reason: tenant.subscriptionStatus === "cancelled" ? "subscription-cancelled" : "subscription-suspended" };
+    const reason = tenant.subscriptionStatus === "cancelled"
+      ? "subscription-cancelled"
+      : tenant.subscriptionStatus === "suspended"
+        ? "subscription-suspended"
+        : "subscription-invalid";
+    return { allowed: false, reason };
   }
   const availability = featureAvailability as Record<string, string>;
   if (!Object.hasOwn(availability, feature)) return { allowed: false, reason: "feature-unknown" };
@@ -57,6 +64,7 @@ export function featureAccessMessage(tenant: Tenant | null, feature: string): st
     "trial-expired": "O período de avaliação terminou. Consulte os dados enquanto o plano é revisado.",
     "subscription-suspended": "A assinatura está suspensa. Os dados permanecem disponíveis para consulta.",
     "subscription-cancelled": "A assinatura foi cancelada. Os dados permanecem disponíveis para consulta.",
+    "subscription-invalid": "O estado da assinatura é inválido. Solicite revisão do Platform Owner.",
     "demo-unavailable": "A demonstração só está disponível no Emulator Suite local.",
     "plan-required": "Este recurso não está incluído no plano atual.",
     "feature-not-implemented": "Este recurso ainda não está disponível nesta versão.",
@@ -73,7 +81,7 @@ export function commercialStatusMessage(tenant: Tenant | null): string | null {
   if (status.reason === "trial-expired") return "O período de avaliação terminou. Os dados permanecem preservados e a operação está em modo de leitura.";
   if (status.reason === "subscription-cancelled") return "Assinatura cancelada. Os dados permanecem preservados para consulta.";
   if (status.reason === "subscription-suspended") return "Assinatura suspensa. Os dados permanecem preservados para consulta.";
-  if (status.reason === "demo-unavailable" || status.reason === "invalid-trial") return "Estado comercial inválido. A operação está bloqueada até revisão do Platform Owner.";
+  if (status.reason === "demo-unavailable" || status.reason === "invalid-trial" || status.reason === "subscription-invalid") return "Estado comercial inválido. A operação está bloqueada até revisão do Platform Owner.";
   return null;
 }
 

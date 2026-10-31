@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { deleteApp, initializeApp, type FirebaseApp } from "firebase/app";
+import { initializeApp as initializeAdminApp, deleteApp as deleteAdminApp, type App as AdminApp } from "firebase-admin/app";
+import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut, type Auth } from "firebase/auth";
 import { connectFirestoreEmulator, doc, getDoc, getDocs, getFirestore, query, where, collection, type Firestore } from "firebase/firestore";
 import { connectFunctionsEmulator, getFunctions, httpsCallable, type Functions } from "firebase/functions";
@@ -10,6 +12,7 @@ let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 let functions: Functions;
+let adminApp: AdminApp;
 
 async function signIn(email: string) {
   if (auth.currentUser) await signOut(auth);
@@ -21,6 +24,7 @@ function callable<Input, Output>(name: string) {
 }
 
 beforeAll(() => {
+  adminApp = initializeAdminApp({ projectId }, "essential-flow-admin");
   app = initializeApp({
     apiKey: "demo-api-key",
     authDomain: "localhost",
@@ -42,6 +46,7 @@ beforeAll(() => {
 afterAll(async () => {
   if (auth?.currentUser) await signOut(auth);
   if (app) await deleteApp(app);
+  if (adminApp) await deleteAdminApp(adminApp);
 });
 
 describe("fluxo essencial em dois tenants", () => {
@@ -56,12 +61,11 @@ describe("fluxo essencial em dois tenants", () => {
     });
     expect(created.data).toMatchObject({ slug: "tenant-readiness", status: "onboarding", ownerFound: false });
 
-    const publicLookup = () => getDocs(query(
-      collection(db, "tenants"),
-      where("slug", "==", "tenant-readiness"),
-      where("status", "==", "active"),
-    ));
-    expect((await publicLookup()).empty).toBe(true);
+    // The public resolver must hide onboarding and suspended stores,
+    // even when the Platform Owner can read full tenant metadata.
+    const publicLookup=async()=> (await callable<{slug:string},{tenant:{id:string;slug:string}|null}>(
+      "getPublicTenant")({slug:"tenant-readiness"})).data.tenant;
+    expect(await publicLookup()).toBeNull();
 
     const setStatus = callable<{ tenantId: string; status: "active" | "suspended"; reason: string }, { tenantId: string; status: string }>("setTenantStatus");
     await setStatus({ tenantId: created.data.tenantId, status: "active", reason: "Responsável validado para homologação" });
@@ -73,6 +77,7 @@ describe("fluxo essencial em dois tenants", () => {
     const assignPlan = callable<{
       tenantId: string; planId: string; subscriptionStatus: string; reason: string;
     }, { unchanged: boolean }>("assignTenantPlan");
+    await signIn("owner.alpha@demo.sorveteria.test");
     await expect(assignPlan({ tenantId: created.data.tenantId, planId: "pro", subscriptionStatus: "trial", reason: "Tentativa sem autorização" }))
       .rejects.toMatchObject({ code: "functions/permission-denied" });
     await signIn("platform@demo.sorveteria.test");
@@ -89,15 +94,20 @@ describe("fluxo essencial em dois tenants", () => {
       .rejects.toMatchObject({ code: "functions/failed-precondition" });
     const entered = await callable<{ tenantId: string }, { tenantId: string; slug: string }>("enterTenantContext")({ tenantId: created.data.tenantId });
     expect(entered.data.slug).toBe("tenant-readiness");
-    expect((await publicLookup()).docs).toHaveLength(1);
+    expect(await publicLookup()).toMatchObject({id:created.data.tenantId,slug:"tenant-readiness"});
 
     await setStatus({ tenantId: created.data.tenantId, status: "suspended", reason: "Fim do cenário de homologação" });
-    expect((await publicLookup()).empty).toBe(true);
+    expect(await publicLookup()).toBeNull();
+    await expect(callable("getPublicCheckoutSettings")({tenantId:created.data.tenantId}))
+      .rejects.toMatchObject({code:"functions/not-found"});
     const audit = await getDocs(collection(db, `tenants/${created.data.tenantId}/auditLogs`));
     expect(audit.docs.map((entry) => entry.data().action)).toEqual(expect.arrayContaining([
       "tenant.created", "tenant.reactivated", "tenant.plan_assigned", "tenant.context_entered", "tenant.suspended",
     ]));
-    const planAudit = audit.docs.find((entry) => entry.data().action === "tenant.plan_assigned");
+    const planAudits = audit.docs.filter((entry) => entry.data().action === "tenant.plan_assigned");
+    expect(planAudits).toHaveLength(2);
+    const planAudit = planAudits.find((entry) => entry.data().reason === "Avaliação comercial aprovada");
+    expect(planAudit).toBeDefined();
     expect(planAudit?.data()).toMatchObject({ reason: "Avaliação comercial aprovada", metadata: { previous: { planId: null, subscriptionStatus: null }, next: { planId: "pro", subscriptionStatus: "trial" } } });
 
     await signIn("owner.alpha@demo.sorveteria.test");
@@ -112,21 +122,18 @@ describe("fluxo essencial em dois tenants", () => {
       .rejects.toMatchObject({ code: "functions/resource-exhausted" });
     await expect(addMember({ tenantId: "tenant-alpha", email: "driver.beta@demo.sorveteria.test", role: "driver" }))
       .rejects.toMatchObject({ code: "functions/resource-exhausted" });
-    const counter = await getDoc(doc(db, "tenants/tenant-alpha/commercialMeta/limitCounters"));
-    expect(counter.exists()).toBe(false);
+    // Internal commercial counters are deliberately invisible to client SDKs.
+    // Read through Admin SDK only inside this emulator-only integration fixture.
+    const counter = await getAdminFirestore(adminApp).doc("tenants/tenant-alpha/commercialMeta/limitCounters").get();
+    expect(counter.exists).toBe(false);
   });
 
   it("resolve tenant, recalcula pedido no servidor e fecha entrega com código single-use", async () => {
     await signIn("customer.alpha@demo.sorveteria.test");
 
-    const publicTenants = await getDocs(query(
-      collection(db, "tenants"),
-      where("slug", "==", "tenant-alpha"),
-      where("status", "==", "active"),
-    ));
-    expect(publicTenants.docs).toHaveLength(1);
-    const tenant = publicTenants.docs[0];
-    expect(tenant.id).toBe("tenant-alpha");
+    const publicTenants=await callable<{slug:string},{tenant:{id:string;slug:string}|null}>("getPublicTenant")({slug:"tenant-alpha"});
+    expect(publicTenants.data.tenant).toMatchObject({id:"tenant-alpha",slug:"tenant-alpha"});
+    await expect(getDoc(doc(db,"tenants/tenant-alpha"))).rejects.toMatchObject({code:"permission-denied"});
 
     const ownMembership = await getDoc(doc(db, "memberships/tenant-alpha_customer-alpha"));
     expect(ownMembership.data()).toMatchObject({ tenantId: "tenant-alpha", role: "customer", status: "active" });
@@ -164,9 +171,13 @@ describe("fluxo essencial em dois tenants", () => {
     expect(orderSnapshot.data()?.items[0]).toMatchObject({ unitPriceCents: 1200, lineTotalCents: 1200 });
 
     const trackingRef = doc(db, "tenants/tenant-alpha/publicOrderTracking", publicCode);
-    const tracking = await getDoc(trackingRef);
-    expect(tracking.exists()).toBe(true);
-    expect(Object.keys(tracking.data() || {}).sort()).toEqual(["createdAt", "estimatedMinutes", "fulfillmentMode", "publicCode", "status", "timeline", "updatedAt"].sort());
+    const publicTracking = callable<{tenantId:string;publicCode:string},{tracking:{
+      publicCode:string;status:string;fulfillmentMode:string;timeline:Array<{status:string;at:string}>;estimatedMinutes?:number
+    }|null}>("getPublicOrderTracking");
+    const tracking = (await publicTracking({tenantId:"tenant-alpha",publicCode})).data.tracking;
+    expect(tracking).toMatchObject({publicCode,status:"received",fulfillmentMode:"delivery"});
+    expect(Object.keys(tracking || {}).sort()).toEqual(["estimatedMinutes", "fulfillmentMode", "publicCode", "status", "timeline"].sort());
+    await expect(getDoc(trackingRef)).rejects.toMatchObject({code:"permission-denied"});
     await expect(getDoc(doc(db, "tenants/tenant-alpha/privateDeliveryCodes", orderId))).rejects.toBeDefined();
 
     await signIn("owner.alpha@demo.sorveteria.test");
@@ -203,12 +214,25 @@ describe("fluxo essencial em dois tenants", () => {
 
     await signIn("driver.alpha@demo.sorveteria.test");
     await action({ tenantId: "tenant-alpha", deliveryId: orderId, action: "deliver", deliveryCode: resetResult.data.deliveryCode });
+    // Drivers are only allowed to read their scoped HTTPS delivery projection.
+    // Raw order and delivery documents may contain private confirmation hashes.
+    await expect(getDoc(orderRef)).rejects.toMatchObject({ code: "permission-denied" });
+    await expect(getDoc(doc(db, "tenants/tenant-alpha/deliveries", orderId)))
+      .rejects.toMatchObject({ code: "permission-denied" });
+    const driverSnapshot = await callable<{ tenantId: string }, { deliveries: Array<{
+      orderId: string; tenantId: string; driverId: string; status: string;
+    }> }>("getDriverAssignments")({ tenantId: "tenant-alpha" });
+    expect(driverSnapshot.data.deliveries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ orderId, tenantId: "tenant-alpha", driverId: "driver-alpha", status: "delivered" }),
+    ]));
+    expect(JSON.stringify(driverSnapshot.data)).not.toMatch(/deliveryCodeHash|privateDeliveryCodes|confirmationCode/);
+    await expect(action({ tenantId: "tenant-alpha", deliveryId: orderId, action: "deliver", deliveryCode: resetResult.data.deliveryCode })).rejects.toMatchObject({ code: "functions/failed-precondition" });
+    await signIn("owner.alpha@demo.sorveteria.test");
     const deliveredOrder = await getDoc(orderRef);
     expect(deliveredOrder.data()?.status).toBe("delivered");
-    await expect(action({ tenantId: "tenant-alpha", deliveryId: orderId, action: "deliver", deliveryCode: resetResult.data.deliveryCode })).rejects.toMatchObject({ code: "functions/failed-precondition" });
-    const deliveredTracking = await getDoc(trackingRef);
-    expect(deliveredTracking.data()?.status).toBe("delivered");
-    expect(deliveredTracking.data()).not.toHaveProperty("customer");
-    expect(deliveredTracking.data()).not.toHaveProperty("address");
+    const deliveredTracking=(await publicTracking({tenantId:"tenant-alpha",publicCode})).data.tracking;
+    expect(deliveredTracking?.status).toBe("delivered");
+    expect(deliveredTracking).not.toHaveProperty("customer");
+    expect(deliveredTracking).not.toHaveProperty("address");
   });
 });

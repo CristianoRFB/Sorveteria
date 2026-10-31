@@ -1,74 +1,65 @@
-# SaaS Sorveteria — CODEX READY BASE
+# SaaS Sorveteria — 77 | Multi-tenant / White-label
 
-Este ZIP é a **base de código real** para o repositório atualmente vazio:
+Aplicação **React + TypeScript + Vite + Firebase (Auth, Firestore, Functions e Storage)**, com storefront, catálogo, carrinho, checkout, pedidos, tracking, administração, entregadores e Platform Owner. Cada sorveteria é isolada por tenant, memberships e Rules/Functions.
 
-`CristianoRFB/Sorveteria`
+> **Estado:** desenvolvimento avançado do GOAL MASTER; **não publicado em produção**. Não existe contratação/cobrança automática ativa. Staging real e homologação com cliente piloto ainda requerem ambiente, acesso e autorização explícitos.
 
-## Fonte de verdade
+## Fontes de verdade e histórico
 
-- codebase: este ZIP;
-- decisões comerciais canônicas: `docs/versions/v05-global-consolidation-ready/`;
-- próximo trabalho: `CODEX_NEXT_GOAL.txt`.
+- **Preços, planos e limites aprovados:** `docs/versions/v05-global-consolidation-ready/` (preservar).
+- **Core v06 concluído:** `docs/versions/v06-multitenant-core-ready/` (evidência histórica, não refazer).
+- **Implementação em curso:** branch `codex/goal-master-sorveteria-production-readiness`.
+- **Status verificável e gates por fase:** [GOAL MASTER](docs/GOAL_MASTER_EXECUTION.md) e [CURRENT](docs/CURRENT.md).
+- **Preflight e runbook de release:** [RELEASE PREFLIGHT](docs/RELEASE_PREFLIGHT.md).
+- Os documentos v05/v06 são históricos. Sua redação original não substitui o código atual da branch.
 
-## Estado
-
-```text
-GLOBAL_STAGE=CORE_FIRST
-OPEN_DECISIONS=0
-PRICING=APPROVED
-ENTITLEMENTS=NOT_IMPLEMENTED
-BILLING=DEFERRED
-CODEX_NEXT_GOAL=READY
-```
-
-A base contém React + TypeScript + Vite + Firebase, tenant resolver, domínio multi-tenant inicial,
-Rules, modelos de order/delivery, white-label/QR e documentação histórica/canônica.
-
-Ela **não é production-ready**. O próximo GOAL existe justamente para concluir Auth/memberships/RBAC,
-isolamento Tenant A × Tenant B, Platform Owner, catálogo, carrinho, checkout, pedidos, tracking e
-delivery antes do Global Standard v01 de entitlements.
-
-## Uso no repositório vazio
-
-Extraia **o conteúdo do ZIP na raiz** do clone de:
-
-```text
-https://github.com/CristianoRFB/Sorveteria.git
-```
-
-Depois abra essa pasta/repositório no Codex e use:
-
-```text
-CODEX_NEXT_GOAL.txt
-```
-
-Não crie outro projeto paralelo.
-
-## Execução local
+## Execução local (Node 22 + npm)
 
 ```bash
-npm install
+npm ci
+npm --prefix functions ci
 npm run test
 npm run lint
 npm run build
 npm run test:rules
+npm run test:integration
+npm run docs:diagrams
+npm run docs:check
+npm run docs:leads
 ```
 
-A instalação das dependências não foi concluída no ambiente que empacotou este ZIP por timeout,
-portanto build/testes não são declarados como PASS neste artefato.
+`npm run test:rules` e `npm run test:integration` exigem o Firebase Emulator Suite; a suíte de integração usa **somente** o projeto fictício `demo-sorveteria` e seeds sintéticos. A CI executa esses gates, mais auditorias de vulnerabilidades. O comando de integração inicia emuladores locais separados e **não** usa conta Firebase real.
 
-## Firebase
+```bash
+npm run emulators
+# Em outro terminal:
+npm run dev:emulator
+```
 
-A configuração existente usa o projeto Firebase já definido para esta vertical.
-Nenhuma service account ou segredo administrativo deve ser versionado.
+## Restrições de segurança e operação
 
-## Documentação
+- Toda operação sensível valida tenant, membro, papel e plano no backend/Rules. Dados Alpha e Beta devem permanecer isolados.
+- Storefront, checkout público, catálogo e tracking usam Functions HTTPS com projeções de campos permitidos. Documentos completos do Firestore são restritos a perfis autorizados; o cliente nunca consulta diretamente metadados comerciais privados.
+- O white-label se aplica às rotas da loja e o catálogo aceita fotos HTTPS reais, com lazy loading e fallback visual.
+- O checkout usa uma tentativa UUID idempotente, reconhecida em transação Firestore. Repetir uma tentativa não cria outro pedido nem reexpõe o código privado de entrega.
+- Tracking tem prazo máximo para leitura e refresh com pausa em abas ocultas, finalização em estados terminais e backoff de falhas. **A jornada E2E local foi aprovada três vezes consecutivas no Emulator Suite; staging hospedado ainda não foi validado.**
+- Planos, períodos de avaliação, limites, overrides e atribuição manual estão implementados. Billing automático **não** está aprovado nem implementado.
+- O painel inclui **resumo básico de pedidos** (7/30 dias) com contagens e valores dos pedidos concluídos, calculados por agregação indexada no backend. Os valores não são pagamentos conciliados.
+- O **KDS de cozinha para Pro/Premium** está implementado em `/:tenantSlug/painel/cozinha`. A fila de preparo usa HTTPS com projeção sem dados pessoais, exibe etapas de confirmação/preparo/pronto e reutiliza transições auditadas no backend. Acesso bloqueado para Essencial por padrão.
+- Fotos de produtos podem ser cadastradas, editadas ou removidas pelo administrador usando URLs HTTPS; o cardápio usa carregamento otimizado e fallback visual.
+- `.env.example` é apenas um modelo de campos públicos; arquivos `.env.*` reais, service accounts e certificados privados jamais devem ser versionados.
+- Builds hospedados com projeto `demo-*`, placeholders Firebase ou `VITE_USE_EMULATORS=true` são rejeitados no startup.
 
-Leia primeiro:
+## Preflight de staging e produção (somente leitura)
 
-1. `docs/CURRENT.md`
-2. `docs/STATUS.md`
-3. `docs/NEXT_CODEX_STEP.md`
-4. `docs/versions/v05-global-consolidation-ready/GLOBAL_CONSOLIDATION_HANDOFF.md`
+```bash
+npm run release:preflight -- --environment staging --manifest /caminho/manifesto.local.json
+```
 
-Pricing aprovado permanece intacto. O GOAL não deve reavaliá-lo.
+Ele valida metadados, SHA, configuração Firebase e bloqueios. **Não executa deploy, cobrança nem migração.** Um resultado `EXTERNAL_REVIEW_REQUIRED` significa que ainda é necessária aprovação e verificação humana, não liberação para produção. Consulte o [runbook](docs/RELEASE_PREFLIGHT.md).
+
+## Evidências e próximas etapas
+
+Há CI com testes automatizados e Emulator Suite para checkout concorrente, regras e tracking repetido. Os resultados recentes e SHAs estão no [registro do GOAL MASTER](docs/GOAL_MASTER_EXECUTION.md). As três repetições de E2E no navegador local passaram com 66 screenshots reais de fixtures sintéticas. Ainda faltam staging autorizado, testes hospedados/dispositivos reais, homologação piloto e preflight final de produção.
+
+**Nunca** interpretar a CI verde ou screenshots da v06 como aprovação de deploy público; nenhuma migração de dados reais nem deploy público foi autorizado.
