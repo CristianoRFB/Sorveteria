@@ -24,7 +24,7 @@
   "operational_finance": "not_implemented",
   "coupons": "implemented",
   "expanded_team": "not_implemented",
-  "intermediate_reports": "not_implemented",
+  "intermediate_reports": "implemented",
   "inventory": "not_implemented",
   "recipe_costing": "not_implemented",
   "advanced_finance": "not_implemented",

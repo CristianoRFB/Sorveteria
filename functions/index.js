@@ -13,6 +13,7 @@ const { isActiveTenantMembership } = require("./domain/membership.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const {projectPublicTenant,projectPublicCheckoutSettings}=require("./domain/public-tenant.cjs");
 const {buildBasicSalesSummary}=require("./domain/sales-summary.cjs");
+const {LIMIT:INTERMEDIATE_REPORT_LIMIT,buildIntermediateReport}=require("./domain/intermediate-report.cjs");
 const {normalizeCouponCode,validateCouponConfig,calculateCouponDiscount}=require("./domain/coupons.cjs");
 const {validateDeliveryZones,quoteDeliveryZone}=require("./domain/delivery-zones.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
@@ -1084,6 +1085,45 @@ exports.getTenantSalesSummary=onCall({region:REGION,maxInstances:20},async(reque
   }
   return {days,periodStart:new Date(startMs).toISOString(),
     periodEnd:new Date(endMs).toISOString(),...summary};
+});
+
+/** Pro/Premium operations report: 7/30 rolling 24h buckets and top products.
+ * Returns explicitly sample-scoped data, never exposes raw orders or customer PII.
+ */
+exports.getTenantIntermediateReport=onCall({region:REGION,maxInstances:10},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))
+    fail("invalid-argument","Tenant inválido.");
+  const days=request.data?.days;
+  if(days!==7&&days!==30)fail("invalid-argument","Período deve ser 7 ou 30 dias.");
+  const ref=db.doc("tenants/"+tenantId);
+  const [tenant,member]=await Promise.all([
+    ref.get(),auth.token.platform_owner===true?Promise.resolve(null)
+      :db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const data=member?.exists?member.data():null;
+    if(!isActiveTenantMembership(data,tenantId,auth.uid)
+      ||!["tenant_owner","tenant_admin"].includes(data.role))
+      fail("permission-denied","Apenas gestores podem consultar relatórios intermediários.");
+  }
+  requireCommercialFeature(tenant.data(),"intermediate_reports");
+  const endMs=Date.now(),startMs=endMs-days*86400000;
+  const snapshot=await ref.collection("orders")
+    .where("createdAt",">=",Timestamp.fromMillis(startMs))
+    .where("createdAt","<",Timestamp.fromMillis(endMs))
+    .orderBy("createdAt","desc")
+    .select("createdAt","status","fulfillmentMode","money.totalCents","items")
+    .limit(INTERMEDIATE_REPORT_LIMIT+1).get();
+  const records=snapshot.docs.slice(0,INTERMEDIATE_REPORT_LIMIT).map(d=>d.data());
+  try{return buildIntermediateReport({orders:records,days,startMs,endMs,
+    truncated:snapshot.size>INTERMEDIATE_REPORT_LIMIT});}
+  catch(error){
+    console.error("Invalid operational report", {tenantId,reason:String(error)});
+    fail("internal","Não foi possível calcular o relatório.");
+  }
 });
 
 /** Kitchen board for Pro/Premium: bounded, private and fetched over HTTPS. */
