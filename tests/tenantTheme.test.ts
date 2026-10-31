@@ -13,8 +13,7 @@ describe("tenant theme respects a safe, consistent storefront palette",()=>{
     expect(style["--tenant-radius"]).toBe("20px");
   });
   it("chooses dark text over a light branded primary",()=>{
-    const style=tenantThemeStyles({...base,primaryColor:"#fffaf3",borderRadius:"lg"})
-      as unknown as Record<string,string>;
+    const style=tenantThemeStyles({...base,primaryColor:"#fffaf3",borderRadius:"lg"}) as unknown as Record<string,string>;
     expect(style["--tenant-on-primary"]).toBe("#111111");
     expect(style["--tenant-radius"]).toBe("28px");
   });
