@@ -289,3 +289,10 @@ label { display: grid; gap: 8px; color: #51475d; font-size: .9rem; font-weight: 
   .kitchen-columns { grid-template-columns:1fr; }
   .kitchen-column-cards { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
 }
+
+/* Scoped neighborhood delivery zones editor */
+.delivery-zones-section { margin-top:24px; }
+.delivery-zone-editor { display:grid; gap:14px; min-width:0; padding:18px;
+ border:1px solid #e8dfed; border-radius:16px; }
+.delivery-zone-editor legend { padding:0 8px; font-weight:800; }
+.delivery-zone-editor textarea { width:100%; resize:vertical; }

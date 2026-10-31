@@ -9,6 +9,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { canUseTenantFeature, featureAccessMessage } from "@/domain/entitlements";
 import { checkoutAttemptId, clearCheckoutAttemptId } from "@/domain/checkoutAttempt";
+import { deliveryQuote } from "@/domain/deliveryZones";
 
 function money(cents: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
@@ -43,7 +44,11 @@ export function CheckoutPage() {
   }, [tenant]);
 
   const subtotal = useMemo(() => cartSubtotal(items), [items]);
-  const fee = fulfillmentMode === "delivery" ? settings?.deliveryFeeCents ?? 0 : 0;
+  const zones=settings?.deliveryZones??[];
+  const deliveryPricing=deliveryQuote(address.neighborhood,zones,settings?.deliveryFeeCents??0);
+  const fee=fulfillmentMode==="delivery"?deliveryPricing?.feeCents??0:0;
+  const deliveryAddressAllowed=fulfillmentMode!=="delivery"||deliveryPricing!==null;
+  const zonePricing=zones.length>0;
   const checkoutAllowed = canUseTenantFeature(tenant, "cart")
     && canUseTenantFeature(tenant, "checkout")
     && canUseTenantFeature(tenant, "web_orders");
@@ -53,7 +58,7 @@ export function CheckoutPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submittingRef.current || !tenant || !settings || items.length === 0 || !checkoutAllowed
-      || (fulfillmentMode === "delivery" && !deliveryAllowed) || (fulfillmentMode === "pickup" && !pickupAllowed)) return;
+      || (fulfillmentMode === "delivery" && (!deliveryAllowed||!deliveryAddressAllowed)) || (fulfillmentMode === "pickup" && !pickupAllowed)) return;
     submittingRef.current = true;
     setPending(true); setError(null);
     try {
@@ -103,14 +108,14 @@ export function CheckoutPage() {
       <div className="checkout-main">
         <section className="checkout-section"><span className="step-number">1</span><div><h2>Como receber?</h2><div className="choice-cards">
           {pickupAllowed && <label className={`choice-card ${fulfillmentMode === "pickup" ? "selected" : ""}`}><input type="radio" name="fulfillment" value="pickup" checked={fulfillmentMode === "pickup"} onChange={() => setFulfillmentMode("pickup")} /><span><strong>Retirar na loja</strong><small>Sem taxa de entrega</small></span></label>}
-          {deliveryAllowed && <label className={`choice-card ${fulfillmentMode === "delivery" ? "selected" : ""}`}><input type="radio" name="fulfillment" value="delivery" checked={fulfillmentMode === "delivery"} onChange={() => setFulfillmentMode("delivery")} /><span><strong>Receber em casa</strong><small>Taxa: {money(settings.deliveryFeeCents)}</small></span></label>}
+          {deliveryAllowed && <label className={`choice-card ${fulfillmentMode === "delivery" ? "selected" : ""}`}><input type="radio" name="fulfillment" value="delivery" checked={fulfillmentMode === "delivery"} onChange={() => setFulfillmentMode("delivery")} /><span><strong>Receber em casa</strong><small>{zonePricing?"Taxa conforme bairro":"Taxa: "+money(settings.deliveryFeeCents)}</small></span></label>}
         </div></div></section>
         <section className="checkout-section"><span className="step-number">2</span><div className="checkout-fields"><h2>Seus dados</h2><label>Nome<input required maxLength={120} autoComplete="name" value={customer.name} onChange={(event) => setCustomer((current) => ({ ...current, name: event.target.value }))} /></label><label>Telefone<input required maxLength={40} type="tel" autoComplete="tel" value={customer.phone} onChange={(event) => setCustomer((current) => ({ ...current, phone: event.target.value }))} /></label>
-          {fulfillmentMode === "delivery" && <div className="address-fields"><h3>Endereço de entrega</h3><label>Rua<input required maxLength={160} autoComplete="address-line1" value={address.street} onChange={(event) => setAddress((current) => ({ ...current, street: event.target.value }))} /></label><div className="form-row"><label>Número<input required maxLength={32} value={address.number} onChange={(event) => setAddress((current) => ({ ...current, number: event.target.value }))} /></label><label>Bairro<input required maxLength={100} autoComplete="address-level3" value={address.neighborhood} onChange={(event) => setAddress((current) => ({ ...current, neighborhood: event.target.value }))} /></label></div><label>Referência (opcional)<input maxLength={180} value={address.reference} onChange={(event) => setAddress((current) => ({ ...current, reference: event.target.value }))} /></label></div>}
+          {fulfillmentMode === "delivery" && <div className="address-fields"><h3>Endereço de entrega</h3><label>Rua<input required maxLength={160} autoComplete="address-line1" value={address.street} onChange={(event) => setAddress((current) => ({ ...current, street: event.target.value }))} /></label><div className="form-row"><label>Número<input required maxLength={32} value={address.number} onChange={(event) => setAddress((current) => ({ ...current, number: event.target.value }))} /></label><label>Bairro<input required maxLength={100} autoComplete="address-level3" value={address.neighborhood} onChange={(event) => setAddress((current) => ({ ...current, neighborhood: event.target.value }))} /></label></div>{zonePricing && <p className={deliveryPricing?"form-hint":"error-text"} role="status">{deliveryPricing?`Taxa para o bairro informado: ${money(deliveryPricing.feeCents)}`:"Digite um bairro atendido; entregas fora das zonas cadastradas não são aceitas."}</p>}<label>Referência (opcional)<input maxLength={180} value={address.reference} onChange={(event) => setAddress((current) => ({ ...current, reference: event.target.value }))} /></label></div>}
         </div></section>
         <section className="checkout-section"><span className="step-number">3</span><div><h2>Pagamento</h2>{enabledPayments.length === 0 ? <p className="error-text">A loja ainda não configurou formas de pagamento.</p> : <div className="payment-choice-list">{enabledPayments.map((method) => <label className="payment-choice" key={method.id}><input required type="radio" name="payment" value={method.id} checked={paymentMethodId === method.id} onChange={() => setPaymentMethodId(method.id)} /><span><strong>{method.label}</strong>{method.instructions && <small>{method.instructions}</small>}</span></label>)}</div>}</div></section>
       </div>
-      <aside className="checkout-summary"><h2>Revisão do pedido</h2><ul>{items.map((item) => <li key={item.lineId}><span>{item.quantity}× {item.name}</span><strong>{money(item.unitPriceCents * item.quantity)}</strong></li>)}</ul><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div>{fulfillmentMode === "delivery" && <div><span>Entrega</span><strong>{money(settings.deliveryFeeCents)}</strong></div>}<div className="checkout-total"><span>Total estimado</span><strong>{money(subtotal + fee)}</strong></div><p className="form-hint">Os preços e a disponibilidade são conferidos novamente pela sorveteria ao receber o pedido.</p>{error && <p className="error-text" role="alert">{error}</p>}<button className="button primary full-width" type="submit" disabled={pending || enabledPayments.length === 0 || !checkoutAllowed || (fulfillmentMode === "delivery" && !deliveryAllowed) || (fulfillmentMode === "pickup" && !pickupAllowed)}>{pending ? "Enviando pedido..." : "Confirmar pedido"}</button></aside>
+      <aside className="checkout-summary"><h2>Revisão do pedido</h2><ul>{items.map((item) => <li key={item.lineId}><span>{item.quantity}× {item.name}</span><strong>{money(item.unitPriceCents * item.quantity)}</strong></li>)}</ul><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div>{fulfillmentMode === "delivery" && <div><span>Entrega</span><strong>{deliveryPricing?money(fee):"Bairro não atendido"}</strong></div>}<div className="checkout-total"><span>Total estimado</span><strong>{money(subtotal + fee)}</strong></div><p className="form-hint">Os preços e a disponibilidade são conferidos novamente pela sorveteria ao receber o pedido.</p>{error && <p className="error-text" role="alert">{error}</p>}<button className="button primary full-width" type="submit" disabled={pending || enabledPayments.length === 0 || !checkoutAllowed || (fulfillmentMode === "delivery" && (!deliveryAllowed||!deliveryAddressAllowed)) || (fulfillmentMode === "pickup" && !pickupAllowed)}>{pending ? "Enviando pedido..." : "Confirmar pedido"}</button></aside>
     </form>
   </main>;
 }

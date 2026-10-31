@@ -13,6 +13,7 @@ import type { Membership } from "@/domain/membership";
 import { loadTenantSettings, saveTenantSettings, type TenantSettings } from "@/services/tenantSettings";
 import { LoadingState } from "@/components/LoadingState";
 import { SalesSummaryPanel } from "@/components/SalesSummaryPanel";
+import { DeliveryZonesManager } from "@/components/DeliveryZonesManager";
 import { canUseTenantFeature } from "@/domain/entitlements";
 
 type Tab = "orders" | "catalog" | "settings" | "sales";
@@ -70,6 +71,7 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
   const canManage = isPlatformOwner || scopedRole === "tenant_owner" || scopedRole === "tenant_admin";
   const canReadSales = canUseTenantFeature(tenant,"basic_sales_summary");
   const canUseKitchen = canUseTenantFeature(tenant, "kds");
+  const canUseDeliveryZones = canUseTenantFeature(tenant,"delivery_zones");
   const [tab, setTab] = useState<Tab>("orders");
 
   return (
@@ -90,7 +92,7 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
       {(!canManage || tab === "orders") && <OrderManager tenantId={tenant.id} canResetDeliveryCode={isPlatformOwner || scopedRole === "tenant_owner"} />}
       {canReadSales && tab === "sales" && <SalesSummaryPanel tenantId={tenant.id} />}
       {canManage && tab === "catalog" && <CatalogManager tenantId={tenant.id} />}
-      {tab === "settings" && canManage && <><SettingsEditor tenantId={tenant.id} /><TeamManager tenantId={tenant.id} /></>}
+      {tab === "settings" && canManage && <><SettingsEditor tenantId={tenant.id} />{canUseDeliveryZones&&<DeliveryZonesManager tenantId={tenant.id}/>}<TeamManager tenantId={tenant.id} /></>}
     </main>
   );
 }

@@ -3,7 +3,7 @@ import { db, functions } from "@/lib/firebase";
 import { httpsCallable } from "firebase/functions";
 
 export type TenantPaymentMethod = { id: string; label: string; instructions?: string; enabled: boolean };
-export type TenantSettings = { deliveryFeeCents: number; estimatedMinutes: number; paymentMethods: TenantPaymentMethod[] };
+export type TenantSettings = { deliveryFeeCents: number; estimatedMinutes: number; paymentMethods: TenantPaymentMethod[]; deliveryZones?: import("@/domain/deliveryZones").DeliveryZone[] };
 
 export async function loadTenantSettings(tenantId: string): Promise<TenantSettings> {
   const snapshot = await getDoc(doc(db, "tenants", tenantId, "settings", "main"));
