@@ -3,7 +3,7 @@ import { db, functions } from "@/lib/firebase";
 import { httpsCallable } from "firebase/functions";
 
 export type TenantPaymentMethod = { id: string; label: string; instructions?: string; enabled: boolean };
-export type TenantSettings = { deliveryFeeCents: number; estimatedMinutes: number; paymentMethods: TenantPaymentMethod[] };
+export type TenantSettings = { deliveryFeeCents: number; estimatedMinutes: number; paymentMethods: TenantPaymentMethod[]; deliveryZones?: import("@/domain/deliveryZones").DeliveryZone[] };
 
 export async function loadTenantSettings(tenantId: string): Promise<TenantSettings> {
   const snapshot = await getDoc(doc(db, "tenants", tenantId, "settings", "main"));
@@ -19,4 +19,14 @@ export async function loadTenantSettings(tenantId: string): Promise<TenantSettin
 export async function saveTenantSettings(tenantId: string, settings: TenantSettings): Promise<void> {
   const call = httpsCallable(functions, "updateTenantSettings");
   await call({ tenantId, settings });
+}
+
+/** Customer-facing settings: only enabled payment methods, no raw configuration. */
+export async function loadPublicCheckoutSettings(tenantId: string): Promise<TenantSettings> {
+  const call=httpsCallable<{tenantId:string},{settings:TenantSettings|null}>(
+    functions,"getPublicCheckoutSettings",{timeout:20_000},
+  );
+  const response=await call({tenantId});
+  if (!response.data.settings) throw new Error("A sorveteria ainda não configurou o checkout.");
+  return response.data.settings;
 }

@@ -7,6 +7,7 @@ import { TenantMembershipProvider } from "@/context/TenantMembershipContext";
 import { PlatformOwnerGuard, TenantMemberGuard } from "@/components/AccessGuards";
 import { CommercialStatusNotice } from "@/components/CommercialStatusNotice";
 import { useTenant } from "@/hooks/useTenant";
+import { tenantThemeStyles } from "@/domain/tenantTheme";
 
 const SaasLandingPage = lazy(() => import("@/pages/SaasLandingPage").then((module) => ({ default: module.SaasLandingPage })));
 const PlatformAdminPage = lazy(() => import("@/pages/PlatformAdminPage").then((module) => ({ default: module.PlatformAdminPage })));
@@ -14,6 +15,7 @@ const TenantStorefrontPage = lazy(() => import("@/pages/TenantStorefrontPage").t
 const TenantMenuPage = lazy(() => import("@/pages/TenantMenuPage").then((module) => ({ default: module.TenantMenuPage })));
 const TenantTrackingPage = lazy(() => import("@/pages/TenantTrackingPage").then((module) => ({ default: module.TenantTrackingPage })));
 const TenantAdminPage = lazy(() => import("@/pages/TenantAdminPage").then((module) => ({ default: module.TenantAdminPage })));
+const TenantKitchenPage = lazy(() => import("@/pages/TenantKitchenPage").then((module) => ({ default: module.TenantKitchenPage })));
 const TenantQrAdminPage = lazy(() => import("@/pages/TenantQrAdminPage").then((module) => ({ default: module.TenantQrAdminPage })));
 const CartPage = lazy(() => import("@/pages/CartPage").then((module) => ({ default: module.CartPage })));
 const CheckoutPage = lazy(() => import("@/pages/CheckoutPage").then((module) => ({ default: module.CheckoutPage })));
@@ -22,7 +24,7 @@ const DriverPage = lazy(() => import("@/pages/DriverPage").then((module) => ({ d
 function TenantScopedRoutes() {
   const { tenant } = useTenant();
   const { tenantSlug } = useParams();
-  return <div key={tenant?.id ?? tenantSlug ?? "tenant-unresolved"}><CommercialStatusNotice /><TenantMembershipProvider><CartProvider key={tenant?.id ?? "tenant-unresolved"}>
+  return <div className="tenant-scope" style={tenantThemeStyles(tenant?.branding)} key={tenant?.id ?? tenantSlug ?? "tenant-unresolved"}><CommercialStatusNotice /><TenantMembershipProvider><CartProvider key={tenant?.id ?? "tenant-unresolved"}>
     <Routes>
       <Route index element={<TenantStorefrontPage />} />
       <Route path="cardapio" element={<TenantMenuPage />} />
@@ -31,6 +33,7 @@ function TenantScopedRoutes() {
       <Route path="acompanhar" element={<TenantTrackingPage />} />
       <Route path="painel" element={<TenantAdminRoute><TenantAdminPage /></TenantAdminRoute>} />
       <Route path="painel/qr-codes" element={<TenantAdminRoute><TenantQrAdminPage /></TenantAdminRoute>} />
+      <Route path="painel/cozinha" element={<TenantAdminRoute><TenantKitchenPage /></TenantAdminRoute>} />
       <Route path="painel/entregas" element={<TenantAdminRoute driverOnly><DriverPage /></TenantAdminRoute>} />
     </Routes>
   </CartProvider></TenantMembershipProvider></div>;

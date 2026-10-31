@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenant } from "@/hooks/useTenant";
 import type { DriverDelivery } from "@/services/tenantOperations";
-import { loadOrderForDriver, watchDriverDeliveries } from "@/services/tenantOperations";
+import { watchDriverDeliveries } from "@/services/tenantOperations";
 import { driverDeliveryAction } from "@/services/orderService";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -14,6 +14,14 @@ const labels: Record<string, string> = {
 export function DriverPage() {
   const { tenant } = useTenant();
   const { user } = useAuth();
+  if (!tenant || !user) return <LoadingState label="Carregando sorveteria e sessão..." />;
+  // Changing tenant or Firebase identity must reset deliveries and confirmation codes.
+  return <DriverPageBody key={tenant.id + ":" + user.uid} tenant={tenant} userId={user.uid} />;
+}
+function DriverPageBody({ tenant, userId }: {
+  tenant: NonNullable<ReturnType<typeof useTenant>["tenant"]>;
+  userId: string;
+}) {
   const [rows, setRows] = useState<DriverDelivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,13 +30,12 @@ export function DriverPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!tenant || !user) return;
-    return watchDriverDeliveries(tenant.id, user.uid, (deliveries) => {
+    return watchDriverDeliveries(tenant.id, userId, (deliveries) => {
       setRows(deliveries);
       setLoading(false);
       setError(null);
     }, (watchError) => { setError(watchError.message); setLoading(false); });
-  }, [tenant, user]);
+  }, [tenant.id, userId]);
 
   const visibleRows = useMemo(() => rows.filter((delivery) => delivery.status !== "cancelled"), [rows]);
 
@@ -47,29 +54,24 @@ export function DriverPage() {
     finally { setBusyId(null); }
   }
 
-  if (!tenant) return <LoadingState label="Carregando sorveteria..." />;
   if (loading) return <LoadingState label="Carregando entregas atribuídas..." />;
   return <main className="content driver-content">
     <div className="driver-topbar"><Link to={`/${tenant.slug}/painel`}>← Painel</Link><span>{tenant.branding.displayName}</span></div>
     <span className="eyebrow">Área do entregador</span><h1>Minhas entregas</h1>
     <p className="muted">Veja o endereço e atualize cada etapa. A confirmação é informada pelo cliente no momento da entrega.</p>
     {error && <p className="error-text" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
-    {visibleRows.length === 0 ? <div className="empty-state">Nenhuma entrega atribuída no momento.</div> : <div className="driver-delivery-list">{visibleRows.map((delivery) => <DeliveryCard key={delivery.id} delivery={delivery} tenantId={tenant.id} busy={busyId === delivery.id} code={codes[delivery.id] || ""} setCode={(value) => setCodes((current) => ({ ...current, [delivery.id]: value.toUpperCase() }))} act={act} />)}</div>}
+    {visibleRows.length === 0 ? <div className="empty-state">Nenhuma entrega atribuída no momento.</div> : <div className="driver-delivery-list">{visibleRows.map((delivery) => <DeliveryCard key={delivery.id} delivery={delivery} busy={busyId === delivery.id} code={codes[delivery.id] || ""} setCode={(value) => setCodes((current) => ({ ...current, [delivery.id]: value.toUpperCase() }))} act={act} />)}</div>}
   </main>;
 }
 
-function DeliveryCard({ delivery, tenantId, busy, code, setCode, act }: {
-  delivery: DriverDelivery; tenantId: string; busy: boolean; code: string;
+function DeliveryCard({ delivery, busy, code, setCode, act }: {
+  delivery: DriverDelivery; busy: boolean; code: string;
   setCode: (value: string) => void;
   act: (delivery: DriverDelivery, action: "start" | "arrive" | "deliver" | "failed") => Promise<void>;
 }) {
-  const [details, setDetails] = useState<Pick<DriverDelivery, "address" | "customer" | "publicCode"> | null>(null);
-  useEffect(() => {
-    let active = true;
-    loadOrderForDriver(tenantId, delivery.orderId).then((value) => { if (active) setDetails(value); }).catch(() => { if (active) setDetails(null); });
-    return () => { active = false; };
-  }, [tenantId, delivery.orderId]);
-  const address = details?.address;
+  // The HTTPS assignment snapshot includes only this driver's assigned order details.
+  const details = delivery;
+  const address = details.address;
   const mapQuery = address ? [address.street, address.number, address.neighborhood].filter(Boolean).join(", ") : "";
   return <article className="driver-card">
     <header className="order-card-heading"><div><span className="eyebrow">{details?.publicCode || "Entrega"}</span><h2>{details?.customer?.name || "Carregando pedido..."}</h2></div><span className={`status-pill status-${delivery.status}`}>{labels[delivery.status] || delivery.status}</span></header>

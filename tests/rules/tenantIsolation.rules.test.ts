@@ -42,6 +42,9 @@ beforeEach(async () => {
       setDoc(doc(firestore, "tenants/tenant-alpha/privateDeliveryCodes/order-alpha"), { hash: "secret-hash" }),
       setDoc(doc(firestore, "tenants/tenant-alpha/auditLogs/audit-1"), { action: "order.status_changed", actorId: "owner-alpha" }),
       setDoc(doc(firestore, "tenants/tenant-alpha/settings/main"), { deliveryFeeCents: 500, paymentMethods: [] }),
+      setDoc(doc(firestore, "tenants/tenant-alpha/cashRegister/state"), { activeShiftId: "sh_11111111-1111-4111-8111-111111111111" }),
+      setDoc(doc(firestore, "tenants/tenant-alpha/cashShifts/sh_11111111-1111-4111-8111-111111111111"), { status:"open",expectedCents:2000 }),
+      setDoc(doc(firestore, "tenants/tenant-alpha/cashShifts/sh_11111111-1111-4111-8111-111111111111/movements/m1"), {kind:"inflow",amountCents:2000}),
     ]);
   });
 });
@@ -79,7 +82,8 @@ describe("Firestore Rules — tenant isolation", () => {
   it("restringe staff às áreas operacionais do próprio tenant", async () => {
     const alpha = signed("staff-alpha");
     const beta = signed("staff-beta");
-    await assertSucceeds(getDoc(doc(alpha, "tenants/tenant-alpha")));
+    await assertFails(getDoc(doc(alpha, "tenants/tenant-alpha")));
+    await assertFails(getDoc(doc(alpha, "tenants/tenant-alpha/settings/main")));
     await assertSucceeds(getDoc(doc(alpha, "tenants/tenant-alpha/categories/gelatos")));
     await assertSucceeds(getDoc(doc(alpha, "tenants/tenant-alpha/products/pot")));
     await assertSucceeds(getDoc(doc(alpha, "tenants/tenant-alpha/orders/order-alpha")));
@@ -99,6 +103,33 @@ describe("Firestore Rules — tenant isolation", () => {
     await assertFails(getDoc(doc(db, "memberships/tenant-alpha_owner-alpha")));
   });
 
+  it("visitantes recebem catálogo somente pela projeção HTTPS, nunca documentos brutos", async () => {
+    const anonymous = testEnv!.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(anonymous, "tenants/tenant-alpha/categories/gelatos")));
+    await assertFails(getDoc(doc(anonymous, "tenants/tenant-alpha/products/pot")));
+    await assertFails(getDocs(collection(anonymous, "tenants/tenant-alpha/categories")));
+    await assertFails(getDocs(collection(anonymous, "tenants/tenant-alpha/products")));
+    const customer = signed("customer-alpha");
+    await assertFails(getDoc(doc(customer, "tenants/tenant-alpha/products/pot")));
+    const owner = signed("owner-alpha");
+    await assertSucceeds(getDoc(doc(owner, "tenants/tenant-alpha/products/pot")));
+    await assertSucceeds(getDoc(doc(owner, "tenants/tenant-alpha/categories/gelatos")));
+  });
+
+  it("bloqueia leitura bruta de tenant e settings para visitantes e clientes",async()=>{
+    const visitor=testEnv!.unauthenticatedContext().firestore();
+    const customer=signed("customer-alpha");
+    for(const client of [visitor,customer]){
+      await assertFails(getDoc(doc(client,"tenants/tenant-alpha")));
+      await assertFails(getDocs(query(collection(client,"tenants"),where("slug","==","tenant-alpha"))));
+      await assertFails(getDoc(doc(client,"tenants/tenant-alpha/settings/main")));
+    }
+    const owner=signed("owner-alpha");
+    await assertSucceeds(getDoc(doc(owner,"tenants/tenant-alpha")));
+    await assertSucceeds(getDoc(doc(owner,"tenants/tenant-alpha/settings/main")));
+    await assertFails(getDoc(doc(signed("staff-alpha"),"tenants/tenant-alpha/settings/main")));
+  });
+
   it("cliente não altera role, preço, status, totais ou campos privilegiados", async () => {
     const db = signed("customer-alpha");
     await assertSucceeds(getDoc(doc(db, "tenants/tenant-alpha/orders/order-alpha")));
@@ -109,10 +140,16 @@ describe("Firestore Rules — tenant isolation", () => {
     await assertFails(getDoc(doc(db, "tenants/tenant-alpha/privateDeliveryCodes/order-alpha")));
   });
 
-  it("driver vê somente entrega atribuída e não muda o driverId nem o estado diretamente", async () => {
+  it("entregador não lê documentos brutos de pedidos e entregas nem códigos de confirmação", async () => {
     const db = signed("driver-alpha");
-    await assertSucceeds(getDoc(doc(db, "tenants/tenant-alpha/deliveries/order-alpha")));
-    await assertSucceeds(getDoc(doc(db, "tenants/tenant-alpha/orders/order-alpha")));
+    await assertFails(getDoc(doc(db, "tenants/tenant-alpha")));
+    await assertFails(getDoc(doc(db, "tenants/tenant-alpha/settings/main")));
+    // getDriverAssignments is the only authorized, scoped source of assignment details.
+    await assertFails(getDoc(doc(db, "tenants/tenant-alpha/deliveries/order-alpha")));
+    await assertFails(getDocs(collection(db, "tenants/tenant-alpha/deliveries")));
+    await assertFails(getDoc(doc(db, "tenants/tenant-alpha/orders/order-alpha")));
+    await assertFails(getDocs(collection(db, "tenants/tenant-alpha/orders")));
+    await assertFails(getDoc(doc(db, "tenants/tenant-alpha/privateDeliveryCodes/order-alpha")));
     await assertFails(getDoc(doc(db, "tenants/tenant-beta/deliveries/order-beta")));
     await assertFails(updateDoc(doc(db, "tenants/tenant-alpha/deliveries/order-alpha"), { driverId: "driver-beta", status: "delivered" }));
   });
@@ -126,11 +163,31 @@ describe("Firestore Rules — tenant isolation", () => {
     await assertFails(getDoc(doc(anonymous, "tenants/tenant-suspended/publicOrderTracking/SV-ABCDEFG2")));
   });
 
-  it("expõe apenas a projeção de tracking por get e impede listagem e escrita", async () => {
+  it("bloqueia tracking bruto; clientes usam somente a API pública", async () => {
     const anonymous = testEnv!.unauthenticatedContext().firestore();
-    await assertSucceeds(getDoc(doc(anonymous, "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
+    await assertFails(getDoc(doc(anonymous, "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
+    await assertFails(getDoc(doc(signed("customer-alpha"), "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
+    await assertSucceeds(getDoc(doc(signed("owner-alpha"), "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
     await assertFails(getDocs(collection(anonymous, "tenants/tenant-alpha/publicOrderTracking")));
     await assertFails(setDoc(doc(anonymous, "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG3"), { publicCode: "SV-ABCDEFG3", status: "delivered" }));
+  });
+
+  it("nega leitura e escrita direta do caixa inclusive a owners e Platform Owner; operações apenas via callable",async()=>{
+    const state="tenants/tenant-alpha/cashRegister/state";
+    const shift="tenants/tenant-alpha/cashShifts/sh_11111111-1111-4111-8111-111111111111";
+    const movement=shift+"/movements/m1";
+    const personas=[testEnv!.unauthenticatedContext().firestore(),
+      signed("customer-alpha"),signed("staff-alpha"),signed("owner-alpha"),
+      signed("owner-beta"),signed("platform-owner",{platform_owner:true})];
+    for(const client of personas){
+      await assertFails(getDoc(doc(client,state)));
+      await assertFails(getDoc(doc(client,shift)));
+      await assertFails(getDoc(doc(client,movement)));
+      await assertFails(setDoc(doc(client,state),{activeShiftId:null}));
+      await assertFails(updateDoc(doc(client,shift),{expectedCents:0}));
+      await assertFails(setDoc(doc(client,shift+"/movements/fake"),{amountCents:1}));
+    }
+    await assertFails(getDocs(collection(signed("owner-alpha"),"tenants/tenant-alpha/cashShifts")));
   });
 
   it("mantém audit logs somente de leitura para perfis administrativos", async () => {

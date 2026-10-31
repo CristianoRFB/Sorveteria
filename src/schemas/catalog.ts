@@ -39,7 +39,7 @@ export const catalogProductSchema = z.object({
   priceCents: z.number().int().min(0).max(1_000_000),
   available: z.boolean().default(true),
   optionGroups: z.array(optionGroupSchema).max(20).default([]),
-  imageUrl: z.string().url().optional().or(z.literal("")),
+  imageUrl: z.string().url().max(2048).refine((url) => url.startsWith("https://"), "Use uma URL HTTPS.").optional().or(z.literal("")),
 });
 
 export type CatalogCategoryInput = z.input<typeof catalogCategorySchema>;

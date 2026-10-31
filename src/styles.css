@@ -236,3 +236,110 @@ label { display: grid; gap: 8px; color: #51475d; font-size: .9rem; font-weight: 
   .team-row > span:not(.status-pill) { grid-column: 1; }
   .team-form { grid-template-columns: 1fr; }
 }
+
+
+/* White-label colors extend to all tenant routes; platform marketing stays unchanged. */
+.tenant-scope { min-height: 100vh; background: var(--tenant-bg, #fffaf3); color: var(--tenant-text, #201a2a); }
+.tenant-scope .button { border-radius: var(--tenant-radius, 20px); }
+.tenant-scope .primary { background: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope .secondary { background: var(--tenant-secondary, #f1e9ff); }
+.tenant-scope .eyebrow, .tenant-scope .text-button { color: var(--tenant-primary, #6d28d9); }
+.tenant-scope .category-chips button.selected { background: var(--tenant-primary, #6d28d9); border-color: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope .cart-button span { background: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope button:focus-visible, .tenant-scope a:focus-visible, .tenant-scope input:focus-visible { outline-color: var(--tenant-primary, #6d28d9); }
+
+/* Real catalog photos with a stable fallback for missing or unreachable assets. */
+.product-photo { display: block; width: 100%; height: 150px; object-fit: cover; background: #f1e9ff; }
+
+/* Basic order summary: discrete metrics, no personally identifying data. */
+.sales-summary-controls { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+.sales-summary-controls label { min-width:180px; }
+.sales-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:20px 0; }
+.sales-summary-metric { display:grid; align-content:center; gap:8px; min-height:105px;
+  background:#fff; border:1px solid #eadff0; border-radius:16px; padding:16px; }
+.sales-summary-metric span { font-size:.85rem; color:#51475d; font-weight:650; }
+.sales-summary-metric strong { font-size:clamp(1.2rem,3vw,1.8rem); font-variant-numeric:tabular-nums; }
+@media (max-width:640px) {
+  .sales-summary-controls { width:100%; }
+  .sales-summary-controls label { flex:1; }
+  .sales-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+
+
+/* Pro/Premium Kitchen Display System: responsive, readable from a countertop display. */
+.kitchen-page { max-width: 1500px; }
+.kitchen-page > .section-heading { align-items:flex-start; }
+.kitchen-page h1 { font-size:clamp(2rem,4vw,3.2rem); margin:8px 0 12px; }
+.kitchen-columns { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-top:22px; align-items:start; }
+.kitchen-column { background:#f4eff8; border:1px solid #e6dced; border-radius:20px; padding:12px; min-width:0; }
+.kitchen-column h2 { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 4px 14px; font-size:1.13rem; }
+.kitchen-column-cards { display:grid; gap:12px; }
+.kitchen-ticket { display:grid; gap:16px; border:1px solid #e5dced; padding:16px; background:#fff; border-radius:16px; box-shadow:0 8px 24px rgba(35,20,45,.05); }
+.kitchen-ticket-heading { display:flex; gap:10px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
+.kitchen-ticket-heading div { display:grid; gap:5px; }
+.kitchen-ticket-heading strong { font-size:1.07rem; font-variant-numeric:tabular-nums; }
+.kitchen-ticket-heading div span { color:#51475d; font-size:.8rem; }
+.kitchen-ticket-items { display:grid; gap:12px; list-style:none; margin:0; padding:0; }
+.kitchen-ticket-items li { display:grid; gap:4px; border-top:1px solid #f0ebf3; padding-top:9px; }
+.kitchen-ticket-items small { color:#51475d; line-height:1.5; overflow-wrap:anywhere; }
+.kitchen-ticket .button { min-height:48px; font-size:.95rem; }
+@media(max-width:1100px){ .kitchen-columns { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:640px){
+  .kitchen-page > .section-heading { flex-direction:column; }
+  .kitchen-columns { grid-template-columns:1fr; }
+  .kitchen-column-cards { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+}
+
+/* Scoped neighborhood delivery zones editor */
+.delivery-zones-section { margin-top:24px; }
+.delivery-zone-editor { display:grid; gap:14px; min-width:0; padding:18px;
+ border:1px solid #e8dfed; border-radius:16px; }
+.delivery-zone-editor legend { padding:0 8px; font-weight:800; }
+.delivery-zone-editor textarea { width:100%; resize:vertical; }
+
+/* Promotional coupons: explicit manager form and server-confirmed checkout total. */
+.coupon-list { display:grid;gap:10px;margin:18px 0 24px; }
+.coupon-row {display:flex;gap:14px;justify-content:space-between;align-items:center;flex-wrap:wrap;
+  padding:14px;border:1px solid #eadff0;border-radius:14px;background:#fff;}
+.coupon-row > div:first-child {display:grid;gap:4px;min-width:180px;}
+.coupon-row span {font-size:.88rem;color:#554c61;}
+.coupon-editor {padding-top:16px;border-top:1px solid #eadff0;}
+.coupon-checkout-input {display:grid;gap:7px;margin:4px 0;}
+.coupon-checkout-input small {color:#51475d;line-height:1.5;}
+
+/* Bounded intermediate operational reports; never customer PII. */
+.reports-layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr);gap:16px;margin:20px 0;}
+.reports-card{min-width:0;border:1px solid #eadff0;border-radius:16px;padding:20px;background:#fff;}
+.reports-card h3{margin:0 0 12px;}
+.reports-trend{display:grid;gap:8px;max-height:420px;overflow-y:auto;margin-top:16px;}
+.reports-trend-row{display:grid;grid-template-columns:75px minmax(60px,1fr) 78px;align-items:center;gap:10px;}
+.reports-trend-row time,.reports-trend-row span{font-size:.8rem;font-variant-numeric:tabular-nums;}
+.reports-trend-row span{text-align:right;}
+.reports-bar-track{height:15px;border-radius:8px;background:#f1e9ff;overflow:hidden;}
+.reports-bar-fill{height:100%;background:var(--tenant-primary,#6d28d9);border-radius:8px;}
+.reports-fulfillment{display:grid;gap:8px;margin:12px 0 22px;}
+.reports-fulfillment p{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;margin:0;}
+.reports-fulfillment small{color:#51475d;}
+.reports-products{display:grid;gap:12px;padding-left:22px;margin:16px 0;}
+.reports-products li{padding-left:4px;}
+.reports-products li strong{float:right;}
+@media(max-width:850px){.reports-layout{grid-template-columns:1fr;}}
+@media(max-width:500px){.reports-card{padding:13px;}.reports-trend-row{grid-template-columns:64px minmax(50px,1fr) 67px;gap:5px;}}
+
+/* Pro/Premium manual cash register: readable, responsive, no payment settlement. */
+.cash-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:22px 0;}
+.cash-metrics>div{display:grid;gap:8px;background:#fff;padding:18px;border-radius:16px;border:1px solid #eadff0;}
+.cash-metrics span{font-size:.86rem;color:#554c61;}
+.cash-metrics strong{font-size:1.35rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+.cash-layout{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:22px 0;align-items:start;}
+.cash-form{padding:20px;border-radius:16px;border:1px solid #eadff0;background:#fff;}
+.cash-form h3{margin:0;}
+.cash-form textarea{width:100%;resize:vertical;}
+.cash-movements,.cash-history{margin:20px 0;}
+.cash-movements ul,.cash-history ul{padding:0;list-style:none;display:grid;gap:10px;}
+.cash-movements li,.cash-history li{background:#fff;border:1px solid #eadff0;border-radius:12px;
+  padding:14px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.cash-movements li>div,.cash-history li>div{display:grid;gap:4px;}
+.cash-history li>div:last-child{text-align:right;}
+.cash-movements li span,.cash-movements li small,.cash-history li span{color:#554c61;font-size:.85rem;}
+@media(max-width:760px){.cash-layout{grid-template-columns:1fr;}.cash-form{padding:14px;}}

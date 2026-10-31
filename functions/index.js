@@ -1,10 +1,23 @@
 const { randomBytes, timingSafeEqual } = require("node:crypto");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
-const { FieldValue, getFirestore } = require("firebase-admin/firestore");
+const { FieldValue, FieldPath, AggregateField, Timestamp, getFirestore } = require("firebase-admin/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeValid } = require("./domain/delivery.cjs");
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
+const { projectPublicTracking } = require("./domain/public-tracking.cjs");
+const { projectAdminOrder } = require("./domain/admin-order-projection.cjs");
+const {projectKitchenTicket}=require("./domain/kitchen-ticket.cjs");
+const { projectDriverAssignment } = require("./domain/driver-assignment-projection.cjs");
+const { isActiveTenantMembership } = require("./domain/membership.cjs");
+const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
+const {projectPublicTenant,projectPublicCheckoutSettings}=require("./domain/public-tenant.cjs");
+const {buildBasicSalesSummary}=require("./domain/sales-summary.cjs");
+const {validateCashOpening,validateCashMovement,validateCashClosing,nextCashBalance,projectCashShift,projectCashMovement}=require("./domain/cash-register.cjs");
+const {LIMIT:INTERMEDIATE_REPORT_LIMIT,buildIntermediateReport}=require("./domain/intermediate-report.cjs");
+const {normalizeCouponCode,validateCouponConfig,calculateCouponDiscount}=require("./domain/coupons.cjs");
+const {validateDeliveryZones,quoteDeliveryZone}=require("./domain/delivery-zones.cjs");
+const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -30,7 +43,7 @@ async function readActiveMembership(transaction, tenantId, uid) {
   const membershipRef = db.doc(`memberships/${tenantId}_${uid}`);
   const snapshot = await transaction.get(membershipRef);
   const membership = snapshot.exists ? snapshot.data() : null;
-  if (!membership || membership.status !== "active") fail("permission-denied", "Vínculo ativo com a sorveteria não encontrado.");
+  if (!isActiveTenantMembership(membership, tenantId, uid)) fail("permission-denied", "Vínculo ativo com a sorveteria não encontrado.");
   return { ref: membershipRef, data: membership };
 }
 
@@ -172,9 +185,20 @@ function validateCatalogProduct(input) {
     });
     return { id, name: groupName, required: group.required, minSelections: group.minSelections, maxSelections: group.maxSelections, options };
   });
-  const imageUrl = typeof input.imageUrl === "string" && input.imageUrl ? input.imageUrl : null;
-  if (imageUrl && !/^https:\/\//.test(imageUrl)) fail("invalid-argument", "A imagem precisa usar HTTPS.");
-  return { name, description, categoryId, kind: input.kind, priceCents: input.priceCents, available: input.available, optionGroups, ...(imageUrl ? { imageUrl } : {}) };
+  // Explicit empty string clears a previous image; omission preserves it for older clients.
+  if (input.imageUrl !== undefined && typeof input.imageUrl !== "string")
+    fail("invalid-argument", "A imagem precisa ser uma URL HTTPS.");
+  const imageUrl = typeof input.imageUrl === "string" ? input.imageUrl.trim() : null;
+  if (imageUrl) {
+    let parsed;
+    try { parsed = new URL(imageUrl); }
+    catch { fail("invalid-argument", "URL da imagem inválida."); }
+    if (imageUrl.length > 2048 || parsed.protocol !== "https:" || !parsed.hostname)
+      fail("invalid-argument", "A imagem precisa usar HTTPS.");
+  }
+  return { name, description, categoryId, kind: input.kind, priceCents: input.priceCents,
+    available: input.available, optionGroups,
+    ...(input.imageUrl === undefined ? {} : { imageUrl: imageUrl || null }) };
 }
 
 function resolveSelections(product, selections) {
@@ -432,10 +456,16 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
   if (!Number.isInteger(settings.deliveryFeeCents) || settings.deliveryFeeCents < 0 || settings.deliveryFeeCents > 100000) fail("invalid-argument", "Taxa de entrega inválida.");
   if (!Number.isInteger(settings.estimatedMinutes) || settings.estimatedMinutes < 1 || settings.estimatedMinutes > 600) fail("invalid-argument", "Estimativa inválida.");
   if (!Array.isArray(settings.paymentMethods) || settings.paymentMethods.length < 1 || settings.paymentMethods.length > 8) fail("invalid-argument", "Formas de pagamento inválidas.");
+  const paymentIds = new Set();
   for (const method of settings.paymentMethods) {
-    if (!hasOnlyKeys(method, ["id", "label", "instructions", "enabled"]) || !/^[a-z0-9_-]{2,40}$/.test(method.id)
+    if (!hasOnlyKeys(method, ["id", "label", "instructions", "enabled"])
+      || typeof method.id !== "string" || !/^[a-z0-9_-]{2,40}$/.test(method.id)
+      || paymentIds.has(method.id)
       || typeof method.label !== "string" || !method.label.trim() || method.label.length > 60
-      || typeof method.enabled !== "boolean") fail("invalid-argument", "Forma de pagamento inválida.");
+      || typeof method.enabled !== "boolean"
+      || (method.instructions !== undefined && (typeof method.instructions !== "string"
+        || method.instructions.length > 500))) fail("invalid-argument", "Forma de pagamento inválida.");
+    paymentIds.add(method.id);
   }
   const tenantRef = db.doc(`tenants/${tenantId}`);
   await db.runTransaction(async (transaction) => {
@@ -450,6 +480,160 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
     }));
   });
   return { success: true };
+});
+
+/** Manager-only configuration for Pro/Premium neighborhood-based delivery fees. */
+exports.updateTenantDeliveryZones=onCall({region:REGION},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  let zones;
+  try{zones=validateDeliveryZones(request.data?.zones);}
+  catch(e){fail("invalid-argument",e.message);}
+  const tenantRef=db.doc("tenants/"+tenantId);
+  await db.runTransaction(async(transaction)=>{
+    const tenant=await transaction.get(tenantRef);
+    if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+    const member=await requireTenantManager(transaction,tenantId,auth);
+    requireCommercialFeature(tenant.data(),"delivery_zones");
+    transaction.set(tenantRef.collection("settings").doc("deliveryZones"),
+      {zones,updatedAt:FieldValue.serverTimestamp()});
+    transaction.create(tenantRef.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:member?.data.role||"platform_owner",
+      action:"delivery_zones.updated",entityType:"delivery_zones",
+      entityId:"deliveryZones",metadata:{zoneCount:zones.length},
+    }));
+  });
+  return {success:true,zoneCount:zones.length};
+});
+/** Only names, fee and neighborhood lists reach the public checkout; no raw settings. */
+exports.getTenantDeliveryZones=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  const ref=db.doc("tenants/"+tenantId);
+  const [tenant,member,zonesSnapshot]=await Promise.all([
+    ref.get(),auth.token.platform_owner===true?Promise.resolve(null):
+      db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+    ref.collection("settings").doc("deliveryZones").get(),
+  ]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const data=member?.exists?member.data():null;
+    if(!isActiveTenantMembership(data,tenantId,auth.uid)
+      ||!["tenant_owner","tenant_admin"].includes(data.role))
+      fail("permission-denied","Somente gestores podem configurar zonas.");
+  }
+  requireCommercialFeature(tenant.data(),"delivery_zones");
+  try{return {zones:validateDeliveryZones(zonesSnapshot.exists?zonesSnapshot.data().zones:[])};}
+  catch(e){fail("failed-precondition","Configuração de zonas inválida.");}
+});
+
+/**
+ * Resolve a public storefront via private tenantSlugs mapping, return only allowlisted fields.
+ * Inactive tenants are intentionally indistinguishable from unknown slugs.
+ */
+exports.getPublicTenant=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const slug=requireText(request.data?.slug,"Endereco da sorveteria",64);
+  if(slug.length<2||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))
+    fail("invalid-argument","Endereco da sorveteria invalido.");
+  const mapping=await db.doc("tenantSlugs/"+slug).get();
+  const id=mapping.exists?mapping.data()?.tenantId:null;
+  if(typeof id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(id))return {tenant:null};
+  const snapshot=await db.doc("tenants/"+id).get();
+  const publicTenant=snapshot.exists?projectPublicTenant(id,snapshot.data()):null;
+  return {tenant:publicTenant?.slug===slug?publicTenant:null};
+});
+
+/** Public checkout gets a strictly projected, validated settings payload. */
+exports.getPublicCheckoutSettings=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenant,settings,zonesSnapshot]=await Promise.all([
+    tenantRef.get(),tenantRef.collection("settings").doc("main").get(),
+    tenantRef.collection("settings").doc("deliveryZones").get(),
+  ]);
+  if(!tenant.exists||tenant.data().status!=="active")fail("not-found","Sorveteria indisponivel.");
+  const checkout=settings.exists?projectPublicCheckoutSettings(settings.data()):null;
+  if(!checkout)return {settings:null};
+  if(!evaluateFeature(tenant.data(),"delivery_zones",{demoAllowed:process.env.FUNCTIONS_EMULATOR==="true"}).allowed)
+    return {settings:checkout};
+  let zones;
+  try{zones=validateDeliveryZones(zonesSnapshot.exists?zonesSnapshot.data().zones:[]);}
+  catch(e){fail("failed-precondition","Configuração de zonas inválida.");}
+  return {settings:{...checkout,deliveryZones:zones}};
+});
+
+/** Authenticated and bounded admin catalog snapshot over HTTPS for Owner UI. */
+/** Tenant-scoped public catalogue over finite HTTPS, no WebChannel or private fields. */
+function catalogCursor(request){
+  const cursor=request.data?.cursor ?? null;
+  if(cursor!==null && (typeof cursor!=="string" || !/^[A-Za-z0-9_-]{1,128}$/.test(cursor)))
+    fail("invalid-argument","Cursor do catalogo invalido.");
+  return cursor;
+}
+function catalogProductPage(collectionRef,cursor,availableOnly){
+  let q=availableOnly ? collectionRef.where("available","==",true) : collectionRef;
+  q=q.orderBy(FieldPath.documentId());
+  if(cursor)q=q.startAfter(cursor);
+  return q.limit(100).get();
+}
+function nextCatalogCursor(snapshot){
+  return snapshot.docs.length===100 ? snapshot.docs[snapshot.docs.length-1].id : null;
+}
+
+exports.getPublicCatalog = onCall({region:REGION,maxInstances:20},async(request)=>{
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const tenant=await tenantRef.get();
+  if(!tenant.exists || tenant.data().status!=="active")fail("not-found","Sorveteria indisponivel.");
+  const cursor=catalogCursor(request);
+  const [categories,products]=await Promise.all([
+    tenantRef.collection("categories").where("active","==",true).get(),
+    catalogProductPage(tenantRef.collection("products"),cursor,true),
+  ]);
+  return {
+    ...projectPublicCatalog(categories.docs.map(x=>({id:x.id,data:x.data()})),
+      products.docs.map(x=>({id:x.id,data:x.data()}))),
+    nextCursor:nextCatalogCursor(products),
+  };
+});
+
+exports.getTenantAdminCatalog = onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))
+    fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenant,membership]=await Promise.all([
+    tenantRef.get(),
+    auth.token.platform_owner===true ? Promise.resolve(null) : db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const data=membership?.exists?membership.data():null;
+    if(!data||data.userId!==auth.uid||data.tenantId!==tenantId||data.status!=="active"
+      ||!["tenant_owner","tenant_admin"].includes(data.role))
+      fail("permission-denied","Acesso ao catalogo administrativo nao autorizado.");
+  }
+  const cursor=catalogCursor(request);
+  const [categories,products]=await Promise.all([
+    tenantRef.collection("categories").orderBy("sortOrder").get(),
+    catalogProductPage(tenantRef.collection("products"),cursor,false),
+  ]);
+  return {
+    nextCursor:nextCatalogCursor(products),
+    categories:categories.docs.map(s=>{const d=s.data();return {
+      id:s.id,name:d.name,active:d.active,sortOrder:d.sortOrder,
+    };}),
+    products:products.docs.map(s=>{const d=s.data();return {
+      id:s.id,name:d.name,description:d.description||"",categoryId:d.categoryId,
+      kind:d.kind,priceCents:d.priceCents,available:d.available,
+      optionGroups:d.optionGroups||[],imageUrl:d.imageUrl||null,
+    };}),
+  };
 });
 
 exports.saveCatalogCategory = onCall({ region: REGION }, async (request) => {
@@ -532,6 +716,8 @@ exports.addTenantMember = onCall({ region: REGION }, async (request) => {
     if (role === "tenant_admin" && manager?.data.role !== "tenant_owner" && auth.token.platform_owner !== true) {
       fail("permission-denied", "Somente o responsável pode atribuir perfil de administrador.");
     }
+    if (previous.exists && (previous.data().tenantId !== tenantId || previous.data().userId !== user.uid))
+      fail("failed-precondition", "Vínculo inconsistente para esta sorveteria.");
     if (previous.exists && previous.data().role === "tenant_owner") fail("failed-precondition", "A conta responsável não pode ser substituída por esta ação.");
     const membership = {
       tenantId, userId: user.uid, email: user.email || email, displayName: user.displayName || "",
@@ -564,6 +750,8 @@ exports.setTenantMemberStatus = onCall({ region: REGION }, async (request) => {
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
     const manager = await requireTenantManager(transaction, tenantId, auth);
     if (!memberSnapshot.exists) fail("not-found", "Membro não encontrado.");
+    if (memberSnapshot.data().tenantId !== tenantId || memberSnapshot.data().userId !== userId)
+      fail("failed-precondition", "Vínculo inconsistente para esta sorveteria.");
     if (memberSnapshot.data().role === "tenant_owner") fail("failed-precondition", "A conta responsável não pode ser desativada por esta ação.");
     requireCommercialFeature(tenantSnapshot.data(), "team_management");
     await updateMembershipCapacity(transaction, tenantId, tenantSnapshot.data(), memberSnapshot.data(), { ...memberSnapshot.data(), status });
@@ -574,6 +762,68 @@ exports.setTenantMemberStatus = onCall({ region: REGION }, async (request) => {
     }));
   });
   return { userId, status };
+});
+
+/** Coupon manager endpoints. Codes are never publicly enumerable. */
+exports.getTenantCoupons=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  const ref=db.doc("tenants/"+tenantId);
+  const [tenant,member]=await Promise.all([ref.get(),
+    auth.token.platform_owner===true?Promise.resolve(null):
+      db.doc("memberships/"+tenantId+"_"+auth.uid).get()]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const m=member?.exists?member.data():null;
+    if(!isActiveTenantMembership(m,tenantId,auth.uid)||!["tenant_owner","tenant_admin"].includes(m.role))
+      fail("permission-denied","Apenas gestores podem consultar cupons.");
+  }
+  requireCommercialFeature(tenant.data(),"coupons");
+  const snap=await ref.collection("coupons").orderBy(FieldPath.documentId()).limit(101).get();
+  if(snap.size>100)fail("resource-exhausted","Limite de 100 cupons atingido.");
+  return {coupons:snap.docs.map(d=>{
+    const c=d.data();
+    return {code:d.id,kind:c.kind,value:c.value,minSubtotalCents:c.minSubtotalCents,
+      maxUses:c.maxUses,usedCount:c.usedCount??0,active:c.active,expiresAt:c.expiresAt??null};
+  })};
+});
+exports.upsertTenantCoupon=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  let coupon;
+  try{coupon=validateCouponConfig(request.data?.coupon);}
+  catch(e){fail("invalid-argument",e.message);}
+  const ref=db.doc("tenants/"+tenantId);
+  const couponRef=ref.collection("coupons").doc(coupon.code);
+  await db.runTransaction(async tx=>{
+    const tenant=await tx.get(ref);
+    if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+    const member=await requireTenantManager(tx,tenantId,auth);
+    requireCommercialFeature(tenant.data(),"coupons");
+    const previous=await tx.get(couponRef);
+    const usedCount=previous.exists?previous.data().usedCount:0;
+    if(!Number.isSafeInteger(usedCount)||usedCount<0)
+      fail("failed-precondition","Histórico do cupom inválido.");
+    if(coupon.maxUses!==null&&coupon.maxUses<usedCount)
+      fail("failed-precondition","O limite não pode ser inferior às utilizações realizadas.");
+    if(usedCount>0){
+      const old=previous.data();
+      if(old.kind!==coupon.kind||old.value!==coupon.value
+        ||old.minSubtotalCents!==coupon.minSubtotalCents
+        ||old.expiresAt!==coupon.expiresAt)
+        fail("failed-precondition","Não altere as regras financeiras de um cupom já utilizado.");
+    }
+    tx.set(couponRef,{...coupon,usedCount,updatedAt:FieldValue.serverTimestamp(),
+      ...(previous.exists?{}:{createdAt:FieldValue.serverTimestamp()})},{merge:true});
+    tx.create(ref.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:member?.data.role||"platform_owner",
+      action:"coupon.updated",entityType:"coupon",entityId:coupon.code,
+      metadata:{active:coupon.active,maxUses:coupon.maxUses,previouslyUsed:usedCount},
+    }));
+  });
+  return {code:coupon.code,success:true};
 });
 
 exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (request) => {
@@ -588,10 +838,28 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
   };
   const address = fulfillmentMode === "delivery" ? validateAddress(data.address) : null;
   const paymentMethodId = requireText(data.paymentMethodId, "Forma de pagamento", 40);
+  let couponCode;
+  try{couponCode=normalizeCouponCode(data.couponCode);}
+  catch(e){fail("invalid-argument",e.message);}
+  let requestId;
+  try { requestId = normalizeCheckoutRequestId(data.requestId); }
+  catch (error) { fail("invalid-argument", error.message); }
+  if(couponCode&&!requestId)fail("invalid-argument","Cupom exige identificador de tentativa do pedido.");
   const tenantRef = db.doc(`tenants/${tenantId}`);
+  // Backwards-compatible: old checkout clients may omit requestId during rollout.
+  const idempotencyRef = requestId
+    ? tenantRef.collection("checkoutRequests").doc(checkoutDocumentId(tenantId, request.auth?.uid || null, requestId))
+    : null;
+  let fingerprint = null;
+  if (idempotencyRef) {
+    try { fingerprint = checkoutFingerprint({ tenantId, fulfillmentMode, customer, address, paymentMethodId, items: data.items, couponCode }); }
+    catch (error) { fail("invalid-argument", error.message); }
+  }
   const orderRef = tenantRef.collection("orders").doc();
   const trackingCode = generatedCode("SV-");
   const deliveryCode = fulfillmentMode === "delivery" ? generatedCode() : null;
+  const zonesRef=tenantRef.collection("settings").doc("deliveryZones");
+  const couponRef=couponCode?tenantRef.collection("coupons").doc(couponCode):null;
   const trackingRef = tenantRef.collection("publicOrderTracking").doc(trackingCode);
   const productRefs = data.items.map((item) => {
     if (!item || typeof item !== "object") fail("invalid-argument", "Item do pedido inválido.");
@@ -602,17 +870,28 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
   await db.runTransaction(async (transaction) => {
     const snapshots = await Promise.all([
       transaction.get(tenantRef), transaction.get(tenantRef.collection("settings").doc("main")), transaction.get(trackingRef),
+      transaction.get(zonesRef),
+      couponRef?transaction.get(couponRef):Promise.resolve(null),
       ...productRefs.map((ref) => transaction.get(ref)),
     ]);
-    const [tenantSnapshot, settingsSnapshot, trackingSnapshot, ...productSnapshots] = snapshots;
+    const [tenantSnapshot, settingsSnapshot, trackingSnapshot, zonesSnapshot, couponSnapshot, ...productSnapshots] = snapshots;
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria indisponível para novos pedidos.");
+    // Atomic: competing transactions cannot both create the same marker.
+    const existingRequest = idempotencyRef ? await transaction.get(idempotencyRef) : null;
+    if (existingRequest?.exists) {
+      try { result = replayCheckout(existingRequest.data(), fingerprint); }
+      catch (error) { fail("already-exists", error.message); }
+      return;
+    }
     if (trackingSnapshot.exists) fail("aborted", "Gere o pedido novamente.");
     const tenant = tenantSnapshot.data();
     requireCommercialFeature(tenant, "online_menu");
     requireCommercialFeature(tenant, "checkout");
     requireCommercialFeature(tenant, "web_orders");
-    const settings = settingsSnapshot.exists ? settingsSnapshot.data() : { deliveryFeeCents: 0, estimatedMinutes: 30, paymentMethods: [] };
-    const paymentMethod = settings.paymentMethods?.find((method) => method.id === paymentMethodId && method.enabled === true);
+    // Prices must be validated server-side even if an old or corrupted settings document bypassed the admin form.
+    const settings = projectPublicCheckoutSettings(settingsSnapshot.exists ? settingsSnapshot.data() : null);
+    if (!settings) fail("failed-precondition", "Configuração de checkout inválida. Solicite revisão à sorveteria.");
+    const paymentMethod = settings.paymentMethods.find((method) => method.id === paymentMethodId);
     if (!paymentMethod) fail("failed-precondition", "Forma de pagamento indisponível.");
     if (fulfillmentMode === "delivery") requireCommercialFeature(tenant, "simple_delivery");
     if (fulfillmentMode === "pickup") requireCommercialFeature(tenant, "pickup");
@@ -642,8 +921,26 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
         lineTotalCents,
       });
     }
-    const deliveryFeeCents = fulfillmentMode === "delivery" ? settings.deliveryFeeCents : 0;
-    const totalCents = subtotalCents + deliveryFeeCents;
+    let zoneQuote=null;
+    if(fulfillmentMode==="delivery" && evaluateFeature(tenant,"delivery_zones",
+      {demoAllowed:process.env.FUNCTIONS_EMULATOR==="true"}).allowed){
+      let zones;
+      try{zones=validateDeliveryZones(zonesSnapshot.exists?zonesSnapshot.data().zones:[]);}
+      catch(e){fail("failed-precondition","Configuração de zonas inválida. Consulte a sorveteria.");}
+      zoneQuote=quoteDeliveryZone(zones,address.neighborhood,settings.deliveryFeeCents);
+      if(!zoneQuote)fail("failed-precondition","Entrega indisponível para este bairro.");
+    }
+    const deliveryFeeCents=fulfillmentMode==="delivery"
+      ?(zoneQuote?.feeCents??settings.deliveryFeeCents):0;
+    let discountCents=0;
+    if(couponCode){
+      requireCommercialFeature(tenant,"coupons");
+      const coupon=couponSnapshot?.exists?couponSnapshot.data():null;
+      discountCents=calculateCouponDiscount(coupon,subtotalCents);
+      if(discountCents===null)fail("failed-precondition",
+        "Cupom inválido, expirado, esgotado ou não aplicável ao subtotal.");
+    }
+    const totalCents=subtotalCents+deliveryFeeCents-discountCents;
     const createdAt = FieldValue.serverTimestamp();
     const order = {
       tenantId,
@@ -651,13 +948,15 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
       customerId: request.auth?.uid || null,
       customer,
       address,
+      deliveryZoneId:zoneQuote?.zoneId??null,
+      couponCode:couponCode??null,
       fulfillmentMode,
       status: "received",
       source: { channel: "web" },
       items: lineItems,
       paymentMethodId,
       paymentMethodLabel: paymentMethod.label,
-      money: { subtotalCents, deliveryFeeCents, discountCents: 0, totalCents },
+      money: { subtotalCents, deliveryFeeCents, discountCents, totalCents },
       estimatedMinutes: settings.estimatedMinutes,
       deliveryCodeUsedAt: null,
       timeline: [{ status: "received", at: new Date().toISOString() }],
@@ -665,6 +964,7 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
       updatedAt: createdAt,
     };
     transaction.create(orderRef, order);
+    if(couponRef)transaction.update(couponRef,{usedCount:FieldValue.increment(1)});
     transaction.create(trackingRef, {
       publicCode: trackingCode,
       status: "received",
@@ -678,9 +978,390 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
       hash: deliveryCodeHash(deliveryCode, tenantId, orderRef.id),
       createdAt,
     });
-    result = { orderId: orderRef.id, publicCode: trackingCode, deliveryCode };
+    if (idempotencyRef) transaction.create(idempotencyRef, {
+      fingerprint, orderId: orderRef.id, publicCode: trackingCode, discountCents,totalCents, createdAt,
+    });
+    result = { orderId: orderRef.id, publicCode: trackingCode, deliveryCode, discountCents,totalCents,replayed: false };
   });
   return result;
+});
+
+/**
+ * Public, tenant-scoped tracking read through HTTPS callable.
+ * Avoids browser Firestore streaming hangs observed in emulator E2E.
+ * No customer, address, payment or delivery confirmation data is returned.
+ */
+exports.getPublicOrderTracking = onCall({region:REGION,maxInstances:20}, async (request) => {
+  const tenantId = requireText(request.data?.tenantId, "Sorveteria", 128);
+  const code = requireText(request.data?.publicCode, "Codigo do pedido", 16).toUpperCase();
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId) || !/^SV-[A-HJ-NP-Z2-9]{8}$/.test(code))
+    fail("invalid-argument", "Identificador de acompanhamento invalido.");
+  const tenantRef = db.doc("tenants/" + tenantId);
+  const [tenant, order] = await Promise.all([
+    tenantRef.get(),
+    tenantRef.collection("publicOrderTracking").doc(code).get(),
+  ]);
+  if (!tenant.exists || tenant.data().status !== "active")
+    fail("not-found", "Acompanhamento indisponivel.");
+  return {tracking:order.exists ? projectPublicTracking(order.data(),code) : null};
+});
+
+/**
+ * Authenticated, tenant-scoped administrative read for the Owner orders panel.
+ * Firestore browser listeners can stall in headless emulator runs; this finite
+ * HTTPS callable returns bounded, explicitly projected operational fields.
+ * No privateDeliveryCodes, password reset tokens, or platform-global reads.
+ */
+/** Assigned-only delivery list; authentication and driver membership are validated server-side. */
+exports.getDriverAssignments = onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenant,membership]=await Promise.all([
+    tenantRef.get(),db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenant.exists || tenant.data().status!=="active")fail("not-found","Sorveteria indisponivel.");
+  const member=membership.exists?membership.data():null;
+  if(!member||member.tenantId!==tenantId||member.userId!==auth.uid
+    ||member.status!=="active"||member.role!=="driver")
+    fail("permission-denied","Acesso de entregador nao autorizado.");
+  const assignments=await tenantRef.collection("deliveries").where("driverId","==",auth.uid)
+    .orderBy("updatedAt","desc").limit(50).get();
+  const rows=await Promise.all(assignments.docs.map(async(d)=>{
+    const delivery=d.data();
+    const orderId=delivery.orderId;
+    if(typeof orderId!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(orderId))return null;
+    const orderSnapshot=await tenantRef.collection("orders").doc(orderId).get();
+    return projectDriverAssignment(d.id,tenantId,auth.uid,delivery,
+      orderSnapshot.exists ? orderSnapshot.data() : null);
+  }));
+  return {deliveries:rows.filter(Boolean)};
+});
+
+/** Read-only sales summary, calculated from index aggregations across all orders in a rolling window.
+ * Only the caller's authorized tenant is queried. No customer fields leave the server.
+ */
+exports.getTenantSalesSummary=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
+  const days=request.data?.days;
+  if(days!==7&&days!==30)fail("invalid-argument","Periodo deve ser 7 ou 30 dias.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenantSnapshot,memberSnapshot]=await Promise.all([
+    tenantRef.get(),
+    auth.token.platform_owner===true ? Promise.resolve(null) :
+      db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenantSnapshot.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const member=memberSnapshot?.exists?memberSnapshot.data():null;
+    if(!isActiveTenantMembership(member,tenantId,auth.uid)||!ADMIN_ROLES.has(member.role))
+      fail("permission-denied","Acesso ao resumo de pedidos nao autorizado.");
+  }
+  requireCommercialFeature(tenantSnapshot.data(),"basic_sales_summary");
+  const endMs=Date.now();
+  const startMs=endMs-days*24*60*60*1000;
+  const orders=tenantRef.collection("orders")
+    .where("createdAt",">=",Timestamp.fromMillis(startMs))
+    .where("createdAt","<",Timestamp.fromMillis(endMs));
+  const [all,completed,cancelled]=await Promise.all([
+    orders.count().get(),
+    orders.where("status","in",["delivered","picked_up"])
+      .aggregate({count:AggregateField.count(),amountCents:AggregateField.sum("money.totalCents")}).get(),
+    orders.where("status","==","cancelled").count().get(),
+  ]);
+  let summary;
+  try {
+    summary=buildBasicSalesSummary({
+      orderCount:all.data().count,
+      completedCount:completed.data().count,
+      cancelledCount:cancelled.data().count,
+      completedAmountCents:completed.data().amountCents??0,
+    });
+  } catch (error) {
+    console.error("Invalid aggregate results for a tenant sales summary", {tenantId,reason:String(error)});
+    fail("internal","Nao foi possivel calcular o resumo de pedidos.");
+  }
+  return {days,periodStart:new Date(startMs).toISOString(),
+    periodEnd:new Date(endMs).toISOString(),...summary};
+});
+
+/** Pro/Premium operations report: 7/30 rolling 24h buckets and top products.
+ * Returns explicitly sample-scoped data, never exposes raw orders or customer PII.
+ */
+exports.getTenantIntermediateReport=onCall({region:REGION,maxInstances:10},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))
+    fail("invalid-argument","Tenant inválido.");
+  const days=request.data?.days;
+  if(days!==7&&days!==30)fail("invalid-argument","Período deve ser 7 ou 30 dias.");
+  const ref=db.doc("tenants/"+tenantId);
+  const [tenant,member]=await Promise.all([
+    ref.get(),auth.token.platform_owner===true?Promise.resolve(null)
+      :db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const data=member?.exists?member.data():null;
+    if(!isActiveTenantMembership(data,tenantId,auth.uid)
+      ||!["tenant_owner","tenant_admin"].includes(data.role))
+      fail("permission-denied","Apenas gestores podem consultar relatórios intermediários.");
+  }
+  requireCommercialFeature(tenant.data(),"intermediate_reports");
+  const endMs=Date.now(),startMs=endMs-days*86400000;
+  const snapshot=await ref.collection("orders")
+    .where("createdAt",">=",Timestamp.fromMillis(startMs))
+    .where("createdAt","<",Timestamp.fromMillis(endMs))
+    .orderBy("createdAt","desc")
+    .select("createdAt","status","fulfillmentMode","money.totalCents","items")
+    .limit(INTERMEDIATE_REPORT_LIMIT+1).get();
+  const records=snapshot.docs.slice(0,INTERMEDIATE_REPORT_LIMIT).map(d=>d.data());
+  try{return buildIntermediateReport({orders:records,days,startMs,endMs,
+    truncated:snapshot.size>INTERMEDIATE_REPORT_LIMIT});}
+  catch(error){
+    console.error("Invalid operational report", {tenantId,reason:String(error)});
+    fail("internal","Não foi possível calcular o relatório.");
+  }
+});
+
+/** Manual, audited physical cash register. No automatic settlement or linkage to web orders. */
+function cashTenantId(request){
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  return tenantId;
+}
+async function requireCashOperator(tx,tenantId,auth){
+  if(auth.token.platform_owner===true)return "platform_owner";
+  const member=await readActiveMembership(tx,tenantId,auth.uid);
+  if(!["tenant_owner","tenant_admin","cashier"].includes(member.data.role))
+    fail("permission-denied","Perfil sem acesso ao caixa.");
+  return member.data.role;
+}
+async function assertCashTenant(tx,ref,tenantId,auth){
+  const tenant=await tx.get(ref);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  const role=await requireCashOperator(tx,tenantId,auth);
+  requireCommercialFeature(tenant.data(),"cash_register");
+  return role;
+}
+exports.openTenantCashShift=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request),tenantId=cashTenantId(request);
+  let input;try{input=validateCashOpening({
+    openingCents:request.data?.openingCents,requestId:request.data?.requestId,
+  });}catch(e){fail("invalid-argument",e.message);}
+  const ref=db.doc("tenants/"+tenantId),stateRef=ref.collection("cashRegister").doc("state");
+  const shiftRef=ref.collection("cashShifts").doc("sh_"+input.requestId);
+  let result;
+  await db.runTransaction(async tx=>{
+    const role=await assertCashTenant(tx,ref,tenantId,auth);
+    const [state,previous]=await Promise.all([tx.get(stateRef),tx.get(shiftRef)]);
+    if(previous.exists){
+      const prior=previous.data();
+      if(prior.openedBy!==auth.uid||prior.openingCents!==input.openingCents)
+        fail("already-exists","Tentativa de abertura reutilizada com outros dados.");
+      result={shiftId:shiftRef.id,replayed:true};return;
+    }
+    if(state.exists&&state.data().activeShiftId)
+      fail("failed-precondition","Já existe um turno de caixa aberto.");
+    const at=FieldValue.serverTimestamp();
+    tx.create(shiftRef,{tenantId,status:"open",openingCents:input.openingCents,
+      inflowCents:0,outflowCents:0,expectedCents:input.openingCents,
+      openedBy:auth.uid,openedAt:at,updatedAt:at});
+    tx.set(stateRef,{activeShiftId:shiftRef.id,updatedAt:at});
+    tx.create(ref.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:role,action:"cash_shift.opened",
+      entityType:"cash_shift",entityId:shiftRef.id,
+      metadata:{openingCents:input.openingCents},
+    }));
+    result={shiftId:shiftRef.id,replayed:false};
+  });
+  return result;
+});
+exports.recordTenantCashMovement=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request),tenantId=cashTenantId(request);
+  let input;try{input=validateCashMovement({
+    shiftId:request.data?.shiftId,requestId:request.data?.requestId,
+    kind:request.data?.kind,amountCents:request.data?.amountCents,note:request.data?.note,
+  });}catch(e){fail("invalid-argument",e.message);}
+  const ref=db.doc("tenants/"+tenantId),stateRef=ref.collection("cashRegister").doc("state");
+  const shiftRef=ref.collection("cashShifts").doc(input.shiftId);
+  const movementRef=shiftRef.collection("movements").doc(input.requestId);
+  let result;
+  await db.runTransaction(async tx=>{
+    const role=await assertCashTenant(tx,ref,tenantId,auth);
+    const [state,shift,previous]=await Promise.all([
+      tx.get(stateRef),tx.get(shiftRef),tx.get(movementRef),
+    ]);
+    if(previous.exists){
+      const prior=previous.data();
+      if(prior.kind!==input.kind||prior.amountCents!==input.amountCents
+        ||prior.note!==input.note||prior.createdBy!==auth.uid)
+        fail("already-exists","Tentativa de movimentação reutilizada com outros dados.");
+      result={shiftId:input.shiftId,replayed:true,
+        expectedCents:shift.exists?shift.data().expectedCents:null};
+      return;
+    }
+    if(!state.exists||state.data().activeShiftId!==input.shiftId
+      ||!shift.exists||shift.data().status!=="open")
+      fail("failed-precondition","Este turno de caixa não está aberto.");
+    const current=shift.data();
+    const balance=nextCashBalance(current.expectedCents,input.kind,input.amountCents);
+    if(balance===null)
+      fail("failed-precondition","Movimentação excede o saldo disponível ou o limite operacional.");
+    const at=FieldValue.serverTimestamp();
+    tx.create(movementRef,{tenantId,shiftId:input.shiftId,kind:input.kind,
+      amountCents:input.amountCents,note:input.note,createdBy:auth.uid,createdAt:at});
+    tx.update(shiftRef,{expectedCents:balance,
+      inflowCents:current.inflowCents+(input.kind==="inflow"?input.amountCents:0),
+      outflowCents:current.outflowCents+(input.kind==="outflow"?input.amountCents:0),
+      updatedAt:at});
+    tx.create(ref.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:role,action:"cash_movement.created",
+      entityType:"cash_movement",entityId:input.requestId,
+      metadata:{shiftId:input.shiftId,kind:input.kind,amountCents:input.amountCents},
+    }));
+    result={shiftId:input.shiftId,replayed:false,expectedCents:balance};
+  });
+  return result;
+});
+exports.closeTenantCashShift=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request),tenantId=cashTenantId(request);
+  let input;try{input=validateCashClosing({
+    shiftId:request.data?.shiftId,countedCents:request.data?.countedCents,
+  });}catch(e){fail("invalid-argument",e.message);}
+  const ref=db.doc("tenants/"+tenantId),stateRef=ref.collection("cashRegister").doc("state");
+  const shiftRef=ref.collection("cashShifts").doc(input.shiftId);
+  let result;
+  await db.runTransaction(async tx=>{
+    const role=await assertCashTenant(tx,ref,tenantId,auth);
+    const [state,shift]=await Promise.all([tx.get(stateRef),tx.get(shiftRef)]);
+    if(!shift.exists)fail("not-found","Turno de caixa não encontrado.");
+    if(shift.data().status==="closed")
+      fail("failed-precondition","Turno de caixa já fechado.");
+    if(!state.exists||state.data().activeShiftId!==input.shiftId
+      ||shift.data().status!=="open")
+      fail("failed-precondition","Turno de caixa incorreto ou inativo.");
+    const expectedCents=shift.data().expectedCents;
+    const differenceCents=input.countedCents-expectedCents;
+    const at=FieldValue.serverTimestamp();
+    tx.update(shiftRef,{status:"closed",closedAt:at,closedBy:auth.uid,
+      countedCents:input.countedCents,differenceCents,updatedAt:at});
+    tx.set(stateRef,{activeShiftId:null,updatedAt:at});
+    tx.create(ref.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:role,action:"cash_shift.closed",
+      entityType:"cash_shift",entityId:input.shiftId,
+      metadata:{expectedCents,countedCents:input.countedCents,differenceCents},
+    }));
+    result={shiftId:input.shiftId,expectedCents,
+      countedCents:input.countedCents,differenceCents};
+  });
+  return result;
+});
+/** Bounded manager/cashier read. All numbers are manual cash records, not sales/payment reconciliation. */
+exports.getTenantCashRegister=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request),tenantId=cashTenantId(request);
+  const ref=db.doc("tenants/"+tenantId),stateRef=ref.collection("cashRegister").doc("state");
+  const [tenant,member,state]=await Promise.all([
+    ref.get(),auth.token.platform_owner===true?Promise.resolve(null):
+      db.doc("memberships/"+tenantId+"_"+auth.uid).get(),stateRef.get(),
+  ]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const m=member?.exists?member.data():null;
+    if(!isActiveTenantMembership(m,tenantId,auth.uid)
+      ||!["tenant_owner","tenant_admin","cashier"].includes(m.role))
+      fail("permission-denied","Perfil sem acesso ao caixa.");
+  }
+  requireCommercialFeature(tenant.data(),"cash_register");
+  const activeShiftId=state.exists?state.data().activeShiftId:null;
+  const shiftRef=typeof activeShiftId==="string"
+    &&/^sh_[0-9a-f-]{36}$/.test(activeShiftId)
+    ?ref.collection("cashShifts").doc(activeShiftId):null;
+  const [activeSnapshot,history]=await Promise.all([
+    shiftRef?shiftRef.get():Promise.resolve(null),
+    ref.collection("cashShifts").orderBy("openedAt","desc").limit(10).get(),
+  ]);
+  const [movements]=await Promise.all([
+    activeSnapshot?.exists?shiftRef.collection("movements")
+      .orderBy("createdAt","desc").limit(30).get():Promise.resolve(null),
+  ]);
+  return {activeShift:activeSnapshot?.exists
+      ?projectCashShift(activeSnapshot.id,activeSnapshot.data()):null,
+    movements:movements?.docs.map(d=>projectCashMovement(d.id,d.data())).filter(Boolean)??[],
+    recentShifts:history.docs.map(d=>projectCashShift(d.id,d.data())).filter(Boolean),
+    refreshedAt:new Date().toISOString()};
+});
+
+/** Kitchen board for Pro/Premium: bounded, private and fetched over HTTPS. */
+exports.getTenantKitchenBoard=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))
+    fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenantSnapshot,memberSnapshot]=await Promise.all([
+    tenantRef.get(),
+    auth.token.platform_owner===true ? Promise.resolve(null)
+      : db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenantSnapshot.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const member=memberSnapshot?.exists?memberSnapshot.data():null;
+    if(!isActiveTenantMembership(member,tenantId,auth.uid)||!ADMIN_ROLES.has(member.role))
+      fail("permission-denied","Acesso a cozinha nao autorizado.");
+  }
+  requireCommercialFeature(tenantSnapshot.data(),"kds");
+  const result=await tenantRef.collection("orders")
+    .where("status","in",["received","confirmed","preparing","ready"])
+    .orderBy("createdAt","asc").limit(100).get();
+  return {
+    tickets:result.docs.map(doc=>projectKitchenTicket(doc.id,tenantId,doc.data())).filter(Boolean),
+    limited:result.size===100,
+    refreshedAt:new Date().toISOString(),
+  };
+});
+
+exports.getTenantOperationsSnapshot = onCall({ region: REGION, maxInstances: 20 }, async (request) => {
+  const auth = requireAuth(request);
+  const tenantId = requireText(request.data?.tenantId, "Sorveteria", 128);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId)) fail("invalid-argument", "Tenant invalido.");
+  const tenantRef = db.doc("tenants/" + tenantId);
+  const memberRef = db.doc("memberships/" + tenantId + "_" + auth.uid);
+  const [tenant, member] = await Promise.all([tenantRef.get(), auth.token.platform_owner === true ? Promise.resolve(null) : memberRef.get()]);
+  if (!tenant.exists) fail("not-found", "Sorveteria inexistente.");
+  if (auth.token.platform_owner !== true) {
+    const membership = member?.exists ? member.data() : null;
+    if (!membership || membership.userId !== auth.uid || membership.tenantId !== tenantId
+      || membership.status !== "active" || !ADMIN_ROLES.has(membership.role)) {
+      fail("permission-denied", "Acesso ao painel de pedidos nao autorizado.");
+    }
+  }
+  const [orders, deliveries, memberships] = await Promise.all([
+    tenantRef.collection("orders").orderBy("createdAt","desc").limit(100).get(),
+    tenantRef.collection("deliveries").orderBy("updatedAt","desc").limit(100).get(),
+    db.collection("memberships").where("tenantId","==",tenantId).limit(250).get(),
+  ]);
+  return {
+    orders: orders.docs.map((item) => projectAdminOrder(item.id,tenantId,item.data())),
+    deliveries: deliveries.docs.map((item) => {
+      const d = item.data();
+      return {
+        id:item.id, tenantId, orderId:d.orderId, driverId:d.driverId,
+        status:d.status, failedAttempts:d.failedAttempts ?? 0,
+        confirmationFailures:d.confirmationFailures ?? 0,
+      };
+    }),
+    drivers: memberships.docs.filter((item) => {
+      const d = item.data();
+      return d.role === "driver" && d.status === "active" && d.tenantId === tenantId;
+    }).map((item) => {
+      const d = item.data();
+      return {id:item.id,tenantId,userId:d.userId,role:"driver",status:"active",displayName:d.displayName??"",email:d.email??""};
+    }),
+  };
 });
 
 exports.updateOrderStatus = onCall({ region: REGION }, async (request) => {
@@ -747,7 +1428,8 @@ exports.assignDelivery = onCall({ region: REGION }, async (request) => {
     const order = orderSnapshot.data();
     const isReassignment = order.status === "out_for_delivery" && deliverySnapshot.exists && deliverySnapshot.data().status === "failed";
     if (order.fulfillmentMode !== "delivery" || (order.status !== "ready" && !isReassignment)) fail("failed-precondition", "Pedido não está pronto para atribuição.");
-    if (!driverSnapshot.exists || driverSnapshot.data().role !== "driver" || driverSnapshot.data().status !== "active") fail("failed-precondition", "Entregador não pertence a esta sorveteria.");
+    if (!driverSnapshot.exists || !isActiveTenantMembership(driverSnapshot.data(),tenantId,driverId)
+      || driverSnapshot.data().role !== "driver") fail("failed-precondition", "Entregador não pertence a esta sorveteria.");
     if (deliverySnapshot.exists && !isReassignment) fail("already-exists", "Já existe entrega para este pedido.");
     const codeHash = deliverySnapshot.exists ? deliverySnapshot.data().deliveryCodeHash : privateCodeSnapshot.data()?.hash;
     if (!codeHash) fail("failed-precondition", "Código de confirmação indisponível.");
@@ -791,7 +1473,8 @@ exports.driverDeliveryAction = onCall({ region: REGION }, async (request) => {
     const membershipRef = db.doc(`memberships/${tenantId}_${auth.uid}`);
     const membershipSnapshot = await transaction.get(membershipRef);
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria suspensa ou inexistente.");
-    if (!membershipSnapshot.exists || membershipSnapshot.data().role !== "driver" || membershipSnapshot.data().status !== "active") fail("permission-denied", "Entregador sem vínculo ativo.");
+    if (!membershipSnapshot.exists || !isActiveTenantMembership(membershipSnapshot.data(),tenantId,auth.uid)
+      || membershipSnapshot.data().role !== "driver") fail("permission-denied", "Entregador sem vínculo ativo.");
     requireCommercialFeature(tenantSnapshot.data(), "simple_delivery");
     if (action === "deliver") requireCommercialFeature(tenantSnapshot.data(), "delivery_confirmation");
     if (!deliverySnapshot.exists || !orderSnapshot.exists) fail("not-found", "Entrega não encontrada.");

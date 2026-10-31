@@ -4,10 +4,12 @@ import { useTenant } from "@/hooks/useTenant";
 import { useCart } from "@/hooks/useCart";
 import { cartSubtotal } from "@/domain/cart";
 import { createOrder, type CreatedOrder } from "@/services/orderService";
-import { loadTenantSettings, type TenantSettings } from "@/services/tenantSettings";
+import { loadPublicCheckoutSettings, type TenantSettings } from "@/services/tenantSettings";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { canUseTenantFeature, featureAccessMessage } from "@/domain/entitlements";
+import { checkoutAttemptId, clearCheckoutAttemptId } from "@/domain/checkoutAttempt";
+import { deliveryQuote } from "@/domain/deliveryZones";
 
 function money(cents: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
@@ -22,15 +24,17 @@ export function CheckoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<CreatedOrder | null>(null);
   const submittingRef = useRef(false);
+  const requestIdRef = useRef<{ tenantId: string; id: string } | null>(null);
   const [fulfillmentMode, setFulfillmentMode] = useState<"delivery" | "pickup">("pickup");
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [address, setAddress] = useState({ street: "", number: "", neighborhood: "", reference: "" });
   const [paymentMethodId, setPaymentMethodId] = useState("");
+  const [couponCode,setCouponCode]=useState("");
 
   useEffect(() => {
     if (!tenant) return;
     let active = true;
-    loadTenantSettings(tenant.id).then((value) => {
+    loadPublicCheckoutSettings(tenant.id).then((value) => {
       if (!active) return;
       setSettings(value);
       setPaymentMethodId(value.paymentMethods.find((method) => method.enabled)?.id || "");
@@ -41,29 +45,40 @@ export function CheckoutPage() {
   }, [tenant]);
 
   const subtotal = useMemo(() => cartSubtotal(items), [items]);
-  const fee = fulfillmentMode === "delivery" ? settings?.deliveryFeeCents ?? 0 : 0;
+  const zones=settings?.deliveryZones??[];
+  const deliveryPricing=deliveryQuote(address.neighborhood,zones,settings?.deliveryFeeCents??0);
+  const fee=fulfillmentMode==="delivery"?deliveryPricing?.feeCents??0:0;
+  const deliveryAddressAllowed=fulfillmentMode!=="delivery"||deliveryPricing!==null;
+  const zonePricing=zones.length>0;
   const checkoutAllowed = canUseTenantFeature(tenant, "cart")
     && canUseTenantFeature(tenant, "checkout")
     && canUseTenantFeature(tenant, "web_orders");
   const deliveryAllowed = canUseTenantFeature(tenant, "simple_delivery");
   const pickupAllowed = canUseTenantFeature(tenant, "pickup");
+  const couponsAllowed=canUseTenantFeature(tenant,"coupons");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submittingRef.current || !tenant || !settings || items.length === 0 || !checkoutAllowed
-      || (fulfillmentMode === "delivery" && !deliveryAllowed) || (fulfillmentMode === "pickup" && !pickupAllowed)) return;
+      || (fulfillmentMode === "delivery" && (!deliveryAllowed||!deliveryAddressAllowed)) || (fulfillmentMode === "pickup" && !pickupAllowed)) return;
     submittingRef.current = true;
     setPending(true); setError(null);
     try {
+      const requestId = checkoutAttemptId(tenant.id, requestIdRef.current?.tenantId === tenant.id ? requestIdRef.current.id : null);
+      requestIdRef.current = { tenantId: tenant.id, id: requestId };
       const order = await createOrder({
+        requestId,
         tenantId: tenant.id,
         fulfillmentMode,
         customer,
         ...(fulfillmentMode === "delivery" ? { address } : {}),
         paymentMethodId,
+        ...(couponsAllowed&&couponCode.trim()?{couponCode:couponCode.trim().toUpperCase()}:{}),
         items,
       });
       clear();
+      clearCheckoutAttemptId(tenant.id);
+      requestIdRef.current = null;
       setCreatedOrder(order);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Não foi possível confirmar o pedido.");
@@ -78,6 +93,11 @@ export function CheckoutPage() {
     <p>A sorveteria recebeu seu pedido. Guarde o código para acompanhar o andamento.</p>
     <div className="code-panel"><small>Código público do pedido</small><strong>{createdOrder.publicCode}</strong><Link to={`/${tenant.slug}/acompanhar?code=${createdOrder.publicCode}`}>Acompanhar pedido</Link></div>
     {createdOrder.deliveryCode && <div className="delivery-code-notice"><strong>Código de confirmação da entrega</strong><span>{createdOrder.deliveryCode}</span><p>Mostre este código ao entregador quando seu pedido chegar. Ele é diferente do código de acompanhamento.</p></div>}
+    {typeof createdOrder.totalCents==="number"&&<div className="notice" role="status">
+      {createdOrder.discountCents?<>Desconto aplicado: {money(createdOrder.discountCents)}. </>:null}
+      Total confirmado pelo servidor: <strong>{money(createdOrder.totalCents)}</strong>
+    </div>}
+    {createdOrder.replayed && createdOrder.deliveryCode === null && fulfillmentMode === "delivery" && <p className="notice" role="status">O pedido já havia sido recebido. Para recuperar um código de entrega perdido, solicite à sorveteria um novo código.</p>}
     {settings && settings.paymentMethods.find((method) => method.id === paymentMethodId)?.instructions && <div className="notice"><strong>Pagamento:</strong> {settings.paymentMethods.find((method) => method.id === paymentMethodId)?.instructions}</div>}
     <Link className="button secondary" to={`/${tenant.slug}`}>Voltar à loja</Link>
   </section></main>;
@@ -95,14 +115,18 @@ export function CheckoutPage() {
       <div className="checkout-main">
         <section className="checkout-section"><span className="step-number">1</span><div><h2>Como receber?</h2><div className="choice-cards">
           {pickupAllowed && <label className={`choice-card ${fulfillmentMode === "pickup" ? "selected" : ""}`}><input type="radio" name="fulfillment" value="pickup" checked={fulfillmentMode === "pickup"} onChange={() => setFulfillmentMode("pickup")} /><span><strong>Retirar na loja</strong><small>Sem taxa de entrega</small></span></label>}
-          {deliveryAllowed && <label className={`choice-card ${fulfillmentMode === "delivery" ? "selected" : ""}`}><input type="radio" name="fulfillment" value="delivery" checked={fulfillmentMode === "delivery"} onChange={() => setFulfillmentMode("delivery")} /><span><strong>Receber em casa</strong><small>Taxa: {money(settings.deliveryFeeCents)}</small></span></label>}
+          {deliveryAllowed && <label className={`choice-card ${fulfillmentMode === "delivery" ? "selected" : ""}`}><input type="radio" name="fulfillment" value="delivery" checked={fulfillmentMode === "delivery"} onChange={() => setFulfillmentMode("delivery")} /><span><strong>Receber em casa</strong><small>{zonePricing?"Taxa conforme bairro":"Taxa: "+money(settings.deliveryFeeCents)}</small></span></label>}
         </div></div></section>
         <section className="checkout-section"><span className="step-number">2</span><div className="checkout-fields"><h2>Seus dados</h2><label>Nome<input required maxLength={120} autoComplete="name" value={customer.name} onChange={(event) => setCustomer((current) => ({ ...current, name: event.target.value }))} /></label><label>Telefone<input required maxLength={40} type="tel" autoComplete="tel" value={customer.phone} onChange={(event) => setCustomer((current) => ({ ...current, phone: event.target.value }))} /></label>
-          {fulfillmentMode === "delivery" && <div className="address-fields"><h3>Endereço de entrega</h3><label>Rua<input required maxLength={160} autoComplete="address-line1" value={address.street} onChange={(event) => setAddress((current) => ({ ...current, street: event.target.value }))} /></label><div className="form-row"><label>Número<input required maxLength={32} value={address.number} onChange={(event) => setAddress((current) => ({ ...current, number: event.target.value }))} /></label><label>Bairro<input required maxLength={100} autoComplete="address-level3" value={address.neighborhood} onChange={(event) => setAddress((current) => ({ ...current, neighborhood: event.target.value }))} /></label></div><label>Referência (opcional)<input maxLength={180} value={address.reference} onChange={(event) => setAddress((current) => ({ ...current, reference: event.target.value }))} /></label></div>}
+          {fulfillmentMode === "delivery" && <div className="address-fields"><h3>Endereço de entrega</h3><label>Rua<input required maxLength={160} autoComplete="address-line1" value={address.street} onChange={(event) => setAddress((current) => ({ ...current, street: event.target.value }))} /></label><div className="form-row"><label>Número<input required maxLength={32} value={address.number} onChange={(event) => setAddress((current) => ({ ...current, number: event.target.value }))} /></label><label>Bairro<input required maxLength={100} autoComplete="address-level3" value={address.neighborhood} onChange={(event) => setAddress((current) => ({ ...current, neighborhood: event.target.value }))} /></label></div>{zonePricing && <p className={deliveryPricing?"form-hint":"error-text"} role="status">{deliveryPricing?`Taxa para o bairro informado: ${money(deliveryPricing.feeCents)}`:"Digite um bairro atendido; entregas fora das zonas cadastradas não são aceitas."}</p>}<label>Referência (opcional)<input maxLength={180} value={address.reference} onChange={(event) => setAddress((current) => ({ ...current, reference: event.target.value }))} /></label></div>}
         </div></section>
         <section className="checkout-section"><span className="step-number">3</span><div><h2>Pagamento</h2>{enabledPayments.length === 0 ? <p className="error-text">A loja ainda não configurou formas de pagamento.</p> : <div className="payment-choice-list">{enabledPayments.map((method) => <label className="payment-choice" key={method.id}><input required type="radio" name="payment" value={method.id} checked={paymentMethodId === method.id} onChange={() => setPaymentMethodId(method.id)} /><span><strong>{method.label}</strong>{method.instructions && <small>{method.instructions}</small>}</span></label>)}</div>}</div></section>
       </div>
-      <aside className="checkout-summary"><h2>Revisão do pedido</h2><ul>{items.map((item) => <li key={item.lineId}><span>{item.quantity}× {item.name}</span><strong>{money(item.unitPriceCents * item.quantity)}</strong></li>)}</ul><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div>{fulfillmentMode === "delivery" && <div><span>Entrega</span><strong>{money(settings.deliveryFeeCents)}</strong></div>}<div className="checkout-total"><span>Total estimado</span><strong>{money(subtotal + fee)}</strong></div><p className="form-hint">Os preços e a disponibilidade são conferidos novamente pela sorveteria ao receber o pedido.</p>{error && <p className="error-text" role="alert">{error}</p>}<button className="button primary full-width" type="submit" disabled={pending || enabledPayments.length === 0 || !checkoutAllowed || (fulfillmentMode === "delivery" && !deliveryAllowed) || (fulfillmentMode === "pickup" && !pickupAllowed)}>{pending ? "Enviando pedido..." : "Confirmar pedido"}</button></aside>
+      <aside className="checkout-summary"><h2>Revisão do pedido</h2><ul>{items.map((item) => <li key={item.lineId}><span>{item.quantity}× {item.name}</span><strong>{money(item.unitPriceCents * item.quantity)}</strong></li>)}</ul><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div>{fulfillmentMode === "delivery" && <div><span>Entrega</span><strong>{deliveryPricing?money(fee):"Bairro não atendido"}</strong></div>}{couponsAllowed&&<label className="coupon-checkout-input">Cupom (opcional)<input maxLength={24} value={couponCode}
+        placeholder="GELATO10" autoCapitalize="characters"
+        onChange={e=>setCouponCode(e.target.value.toUpperCase())}/>
+        <small>O desconto será validado e aplicado sobre os produtos pelo servidor ao confirmar o pedido.</small></label>}
+      <div className="checkout-total"><span>{couponCode.trim()&&couponsAllowed?"Total antes do cupom":"Total estimado"}</span><strong>{money(subtotal + fee)}</strong></div><p className="form-hint">Os preços e a disponibilidade são conferidos novamente pela sorveteria ao receber o pedido.</p>{error && <p className="error-text" role="alert">{error}</p>}<button className="button primary full-width" type="submit" disabled={pending || enabledPayments.length === 0 || !checkoutAllowed || (fulfillmentMode === "delivery" && (!deliveryAllowed||!deliveryAddressAllowed)) || (fulfillmentMode === "pickup" && !pickupAllowed)}>{pending ? "Enviando pedido..." : "Confirmar pedido"}</button></aside>
     </form>
   </main>;
 }

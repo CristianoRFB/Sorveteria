@@ -7,3 +7,15 @@ dist/
 .DS_Store
 coverage/
 *.log
+# Any local Firebase / deploy manifests and secrets (non-secret examples are permitted)
+.env*
+!.env.example
+!.env.sample
+*.local.json
+*service-account*.json
+*firebase-adminsdk*.json
+*.pem
+*.p12
+*.pfx
+*.key
+.qa/

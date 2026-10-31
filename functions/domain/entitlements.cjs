@@ -18,7 +18,10 @@ function timestampMillis(value) {
 
 function commercialAccess(tenant, options = {}) {
   if (!tenant || tenant.status !== "active") return { allowed: false, reason: "tenant-inactive", plan: null };
-  const plan = planCatalog.plans[tenant.planId];
+  // Fail closed for inherited names such as constructor, toString and __proto__.
+  const plan = Object.hasOwn(planCatalog.plans, tenant.planId)
+    ? planCatalog.plans[tenant.planId]
+    : null;
   if (!plan || typeof tenant.subscriptionStatus !== "string") return { allowed: false, reason: "plan-unassigned", plan: null };
 
   if (tenant.subscriptionStatus === "demo") {
@@ -30,7 +33,8 @@ function commercialAccess(tenant, options = {}) {
     if (tenant.planId !== planCatalog.trial.planId) return { allowed: false, reason: "invalid-trial", plan };
     const until = timestampMillis(tenant.trialUntil);
     if (!Number.isFinite(until)) return { allowed: false, reason: "invalid-trial", plan };
-    if (options.nowMs >= until) return { allowed: false, reason: "trial-expired", plan };
+    const nowMs = options.nowMs === undefined ? Date.now() : options.nowMs;
+    if (!Number.isFinite(nowMs) || nowMs >= until) return { allowed: false, reason: "trial-expired", plan };
     return { allowed: true, reason: null, plan };
   }
   if (tenant.subscriptionStatus === "suspended") return { allowed: false, reason: "subscription-suspended", plan };

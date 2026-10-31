@@ -1,7 +1,5 @@
 import {
   collection,
-  doc,
-  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -14,6 +12,60 @@ import type { Order } from "@/domain/order";
 import type { Membership } from "@/domain/membership";
 import type { TenantPlanId, TenantSubscriptionStatus } from "@/domain/tenant";
 import { db, functions } from "@/lib/firebase";
+
+/** Finite HTTPS snapshot for Owner operations; avoids emulator browser WebChannel hangs. */
+export type TenantOperationsSnapshot = {orders: Order[];drivers: Membership[];deliveries: DriverDelivery[]};
+export function watchTenantOperations(
+  tenantId: string,
+  onRows: (snapshot: TenantOperationsSnapshot) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  const callable = httpsCallable<{tenantId:string},TenantOperationsSnapshot>(
+    functions, "getTenantOperationsSnapshot", {timeout:20_000},
+  );
+  let active = true;
+  let inFlight = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const clearTimer = () => { if (timer !== undefined) clearTimeout(timer); timer=undefined; };
+  let failures = 0;
+  const refresh = async () => {
+    if (!active || inFlight || document.visibilityState === "hidden") return;
+    inFlight = true;
+    try {
+      const result = await callable({tenantId});
+      if (!active) return;
+      failures = 0;
+      onRows(result.data);
+    } catch (error) {
+      if (active) {
+        failures += 1;
+        onError(error instanceof Error ? error : new Error("Não foi possível atualizar os pedidos."));
+      }
+    } finally {
+      inFlight = false;
+      if (active) {
+        clearTimer();
+        timer = setTimeout(() => { void refresh(); }, Math.min(30_000, 8_000 * 2 ** Math.min(2,failures)));
+      }
+    }
+  };
+  const visibility = () => {
+    if (!active) return;
+    if (document.visibilityState === "visible") {
+      clearTimer();
+      void refresh();
+    } else clearTimer();
+  };
+  document.addEventListener("visibilitychange",visibility);
+  void refresh();
+  return () => {
+    active = false;
+    clearTimer();
+    document.removeEventListener("visibilitychange",visibility);
+  };
+}
+
+
 
 export type TenantSummary = {
   id: string;
@@ -62,19 +114,35 @@ export function watchDrivers(tenantId: string, onRows: (drivers: Membership[]) =
   );
 }
 
-export function watchDriverDeliveries(tenantId: string, driverId: string, onRows: (deliveries: DriverDelivery[]) => void, onError: (error: Error) => void): Unsubscribe {
-  return onSnapshot(
-    query(collection(db, "tenants", tenantId, "deliveries"), where("driverId", "==", driverId), orderBy("updatedAt", "desc"), limit(50)),
-    (snapshot) => onRows(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as DriverDelivery)),
-    (error) => onError(error),
-  );
-}
-
-export async function loadOrderForDriver(tenantId: string, orderId: string): Promise<Pick<DriverDelivery, "address" | "customer" | "publicCode"> | null> {
-  const snapshot = await getDoc(doc(db, "tenants", tenantId, "orders", orderId));
-  if (!snapshot.exists()) return null;
-  const order = snapshot.data();
-  return { address: order.address, customer: order.customer, publicCode: order.publicCode };
+export function watchDriverDeliveries(tenantId: string, _driverId: string, onRows: (deliveries: DriverDelivery[]) => void, onError: (error: Error) => void): Unsubscribe {
+  // Server always derives the driver identity from Firebase Auth, never the caller.
+  const call = httpsCallable<{tenantId:string},{deliveries:DriverDelivery[]}>(functions,"getDriverAssignments",{timeout:20_000});
+  let active = true;
+  let inFlight = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let failures = 0;
+  const clear = () => { if(timer!==undefined)clearTimeout(timer);timer=undefined; };
+  const refresh = async () => {
+    if(!active || inFlight || document.visibilityState==="hidden")return;
+    inFlight = true;
+    try {
+      const result=await call({tenantId});
+      if(active){failures=0;onRows(result.data.deliveries);}
+    } catch(e) {
+      if(active){failures++;onError(e instanceof Error?e:new Error("Falha ao consultar entregas."));}
+    } finally {
+      inFlight=false;
+      if(active){clear();timer=setTimeout(()=>void refresh(),Math.min(60_000,30_000*2**Math.min(1,failures)));}
+    }
+  };
+  const visibility=()=>{
+    if(!active)return;
+    if(document.visibilityState==="visible"){clear();void refresh();}
+    else clear();
+  };
+  document.addEventListener("visibilitychange",visibility);
+  void refresh();
+  return ()=>{active=false;clear();document.removeEventListener("visibilitychange",visibility);};
 }
 
 export async function platformCreateTenant(input: { displayName: string; slug: string; ownerEmail?: string }) {
