@@ -34,11 +34,6 @@ service cloud.firestore {
     function tenantAdmin(tenantId) {
       return hasRole(tenantId, ["tenant_owner", "tenant_admin"]);
     }
-    function tenantDriver(tenantId) { return hasRole(tenantId, ["driver"]); }
-    function tenantIsActive(tenantId) {
-      return exists(/databases/$(database)/documents/tenants/$(tenantId))
-        && get(/databases/$(database)/documents/tenants/$(tenantId)).data.status == "active";
-    }
     match /users/{uid} {
       allow get: if signedIn() && request.auth.uid == uid || platformOwner();
       allow list: if platformOwner();
@@ -61,13 +56,15 @@ service cloud.firestore {
 
     match /tenants/{tenantId} {
       // Public storefront uses getPublicTenant HTTPS projection, never raw metadata.
-      allow get: if platformOwner() || tenantStaff(tenantId) || tenantDriver(tenantId);
+      // Full commercial tenant metadata is available only to managers.
+      // Staff, cashiers and drivers use scoped HTTPS projections.
+      allow get: if platformOwner() || tenantAdmin(tenantId);
       allow list: if platformOwner();
       allow create, update, delete: if false;
 
       match /settings/{settingsId} {
         // Customer checkout uses getPublicCheckoutSettings HTTPS allowlist.
-        allow get: if platformOwner() || tenantStaff(tenantId);
+        allow get: if platformOwner() || tenantAdmin(tenantId);
         allow list: if false;
         allow create, update, delete: if false;
       }
