@@ -39,6 +39,8 @@ npm run dev:emulator
 ## Restrições de segurança e operação
 
 - Toda operação sensível valida tenant, membro, papel e plano no backend/Rules. Dados Alpha e Beta devem permanecer isolados.
+- Storefront, checkout público, catálogo e tracking usam Functions HTTPS com projeções de campos permitidos. Documentos completos do Firestore são restritos a perfis autorizados; o cliente nunca consulta diretamente metadados comerciais privados.
+- O white-label se aplica às rotas da loja e o catálogo aceita fotos HTTPS reais, com lazy loading e fallback visual.
 - O checkout usa uma tentativa UUID idempotente, reconhecida em transação Firestore. Repetir uma tentativa não cria outro pedido nem reexpõe o código privado de entrega.
 - Tracking tem prazo máximo para leitura e refresh com pausa em abas ocultas, finalização em estados terminais e backoff de falhas. **A jornada E2E local foi aprovada três vezes consecutivas no Emulator Suite; staging hospedado ainda não foi validado.**
 - Planos, períodos de avaliação, limites, overrides e atribuição manual estão implementados. Billing automático **não** está aprovado nem implementado.
