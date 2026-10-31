@@ -47,6 +47,7 @@ npm run dev:emulator
 - O painel inclui **resumo básico de pedidos** (7/30 dias) com contagens e valores dos pedidos concluídos, calculados por agregação indexada no backend. Os valores não são pagamentos conciliados.
 - O **KDS de cozinha para Pro/Premium** está implementado em `/:tenantSlug/painel/cozinha`. A fila de preparo usa HTTPS com projeção sem dados pessoais, exibe etapas de confirmação/preparo/pronto e reutiliza transições auditadas no backend. Acesso bloqueado para Essencial por padrão.
 - **Zonas de entrega Pro/Premium por bairro:** gestores configuram bairros e taxas na aba de checkout; o servidor valida o bairro e recalcula o frete na transação de criação do pedido, recusando endereços fora da cobertura. Não é geolocalização automática; sem zonas configuradas, o frete fixo existente é mantido.
+- **Cupons Pro/Premium:** gestores cadastram códigos com desconto percentual ou fixo, validade e limite de usos. O checkout valida o código e totaliza no servidor, consumindo resgates atomicamente; a contagem ocorre ao criar o pedido, não após pagamento.
 - Fotos de produtos podem ser cadastradas, editadas ou removidas pelo administrador usando URLs HTTPS; o cardápio usa carregamento otimizado e fallback visual.
 - `.env.example` é apenas um modelo de campos públicos; arquivos `.env.*` reais, service accounts e certificados privados jamais devem ser versionados.
 - Builds hospedados com projeto `demo-*`, placeholders Firebase ou `VITE_USE_EMULATORS=true` são rejeitados no startup.
