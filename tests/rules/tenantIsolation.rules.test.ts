@@ -42,6 +42,9 @@ beforeEach(async () => {
       setDoc(doc(firestore, "tenants/tenant-alpha/privateDeliveryCodes/order-alpha"), { hash: "secret-hash" }),
       setDoc(doc(firestore, "tenants/tenant-alpha/auditLogs/audit-1"), { action: "order.status_changed", actorId: "owner-alpha" }),
       setDoc(doc(firestore, "tenants/tenant-alpha/settings/main"), { deliveryFeeCents: 500, paymentMethods: [] }),
+      setDoc(doc(firestore, "tenants/tenant-alpha/cashRegister/state"), { activeShiftId: "sh_11111111-1111-4111-8111-111111111111" }),
+      setDoc(doc(firestore, "tenants/tenant-alpha/cashShifts/sh_11111111-1111-4111-8111-111111111111"), { status:"open",expectedCents:2000 }),
+      setDoc(doc(firestore, "tenants/tenant-alpha/cashShifts/sh_11111111-1111-4111-8111-111111111111/movements/m1"), {kind:"inflow",amountCents:2000}),
     ]);
   });
 });
@@ -167,6 +170,24 @@ describe("Firestore Rules — tenant isolation", () => {
     await assertSucceeds(getDoc(doc(signed("owner-alpha"), "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
     await assertFails(getDocs(collection(anonymous, "tenants/tenant-alpha/publicOrderTracking")));
     await assertFails(setDoc(doc(anonymous, "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG3"), { publicCode: "SV-ABCDEFG3", status: "delivered" }));
+  });
+
+  it("nega leitura e escrita direta do caixa inclusive a owners e Platform Owner; operações apenas via callable",async()=>{
+    const state="tenants/tenant-alpha/cashRegister/state";
+    const shift="tenants/tenant-alpha/cashShifts/sh_11111111-1111-4111-8111-111111111111";
+    const movement=shift+"/movements/m1";
+    const personas=[testEnv!.unauthenticatedContext().firestore(),
+      signed("customer-alpha"),signed("staff-alpha"),signed("owner-alpha"),
+      signed("owner-beta"),signed("platform-owner",{platform_owner:true})];
+    for(const client of personas){
+      await assertFails(getDoc(doc(client,state)));
+      await assertFails(getDoc(doc(client,shift)));
+      await assertFails(getDoc(doc(client,movement)));
+      await assertFails(setDoc(doc(client,state),{activeShiftId:null}));
+      await assertFails(updateDoc(doc(client,shift),{expectedCents:0}));
+      await assertFails(setDoc(doc(client,shift+"/movements/fake"),{amountCents:1}));
+    }
+    await assertFails(getDocs(collection(signed("owner-alpha"),"tenants/tenant-alpha/cashShifts")));
   });
 
   it("mantém audit logs somente de leitura para perfis administrativos", async () => {
