@@ -316,6 +316,10 @@ try {
   await clickButton("Catálogo", "[role=tab]");
   await waitText("Catálogo da loja");
   await capture("tenant-owner-catalogo.png");
+  // Essential is intentionally not entitled to KDS; neither the route nor the backend
+  // may disclose kitchen tickets for a lower-tier tenant.
+  await navigate("/tenant-alpha/painel/cozinha");
+  await waitText("Este recurso não está incluído no plano atual.", 30000);
 
   await clearOrigin();
   await login("driver.alpha@demo.sorveteria.test", "/tenant-alpha/painel/entregas");
