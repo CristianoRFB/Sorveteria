@@ -170,6 +170,10 @@ async function capture(name, mobile = false) {
 }
 
 async function clearOrigin() {
+  // Unload the old page before resetting browser state, so active Firebase
+  // listeners cannot write the former session back during the reset.
+  await send("Page.navigate", { url: "about:blank" });
+  await waitUntil(async () => await evaluate("location.href === 'about:blank'"), "aba vazia", 20000);
   await send("Storage.clearDataForOrigin", { origin: baseUrl, storageTypes: "all" });
   await navigate(`/?qa-reset=${Date.now()}`);
   // Verify the Firebase SDK's actual identity after a full page navigation.
