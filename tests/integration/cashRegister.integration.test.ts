@@ -16,11 +16,11 @@ type CashSnapshot={activeShift:{id:string;status:string;expectedCents:number}|nu
   recentShifts:Array<{id:string;status:string;differenceCents:number|null}>};
 const snapshot=(id=tenantId)=>httpsCallable<{tenantId:string},CashSnapshot>(
   functions,"getTenantCashRegister")({tenantId:id});
-const open=(openingCents=5000,requestId=randomUUID(),id=tenantId)=>
+const open=(openingCents=5000,requestId:string=randomUUID(),id=tenantId)=>
   httpsCallable<{tenantId:string;openingCents:number;requestId:string},ShiftResponse>(
     functions,"openTenantCashShift")({tenantId:id,openingCents,requestId});
 const move=(shiftId:string,kind:"inflow"|"outflow",amountCents:number,
-  requestId=randomUUID(),note="Troco conferido",id=tenantId)=>
+  requestId:string=randomUUID(),note="Troco conferido",id=tenantId)=>
   httpsCallable<{tenantId:string;shiftId:string;requestId:string;kind:string;amountCents:number;note:string},
     MovementResponse>(functions,"recordTenantCashMovement")({
     tenantId:id,shiftId,kind,amountCents,requestId,note});
