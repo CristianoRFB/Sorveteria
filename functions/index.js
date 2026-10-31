@@ -7,6 +7,7 @@ const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeVa
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
 const { projectPublicTracking } = require("./domain/public-tracking.cjs");
 const { projectAdminOrder } = require("./domain/admin-order-projection.cjs");
+const {projectKitchenTicket}=require("./domain/kitchen-ticket.cjs");
 const { projectDriverAssignment } = require("./domain/driver-assignment-projection.cjs");
 const { isActiveTenantMembership } = require("./domain/membership.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
@@ -935,6 +936,35 @@ exports.getTenantSalesSummary=onCall({region:REGION,maxInstances:20},async(reque
   }
   return {days,periodStart:new Date(startMs).toISOString(),
     periodEnd:new Date(endMs).toISOString(),...summary};
+});
+
+/** Kitchen board for Pro/Premium: bounded, private and fetched over HTTPS. */
+exports.getTenantKitchenBoard=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))
+    fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenantSnapshot,memberSnapshot]=await Promise.all([
+    tenantRef.get(),
+    auth.token.platform_owner===true ? Promise.resolve(null)
+      : db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenantSnapshot.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const member=memberSnapshot?.exists?memberSnapshot.data():null;
+    if(!isActiveTenantMembership(member,tenantId,auth.uid)||!ADMIN_ROLES.has(member.role))
+      fail("permission-denied","Acesso a cozinha nao autorizado.");
+  }
+  requireCommercialFeature(tenantSnapshot.data(),"kds");
+  const result=await tenantRef.collection("orders")
+    .where("status","in",["received","confirmed","preparing","ready"])
+    .orderBy("createdAt","asc").limit(100).get();
+  return {
+    tickets:result.docs.map(doc=>projectKitchenTicket(doc.id,tenantId,doc.data())).filter(Boolean),
+    limited:result.size===100,
+    refreshedAt:new Date().toISOString(),
+  };
 });
 
 exports.getTenantOperationsSnapshot = onCall({ region: REGION, maxInstances: 20 }, async (request) => {

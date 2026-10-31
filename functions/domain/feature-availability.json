@@ -16,7 +16,7 @@
   "order_management": "implemented",
   "team_management": "implemented",
   "basic_sales_summary": "implemented",
-  "kds": "not_implemented",
+  "kds": "implemented",
   "advanced_delivery_management": "not_implemented",
   "delivery_zones": "not_implemented",
   "table_qr": "not_implemented",
