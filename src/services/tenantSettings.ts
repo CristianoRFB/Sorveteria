@@ -20,3 +20,13 @@ export async function saveTenantSettings(tenantId: string, settings: TenantSetti
   const call = httpsCallable(functions, "updateTenantSettings");
   await call({ tenantId, settings });
 }
+
+/** Customer-facing settings: only enabled payment methods, no raw configuration. */
+export async function loadPublicCheckoutSettings(tenantId: string): Promise<TenantSettings> {
+  const call=httpsCallable<{tenantId:string},{settings:TenantSettings|null}>(
+    functions,"getPublicCheckoutSettings",{timeout:20_000},
+  );
+  const response=await call({tenantId});
+  if (!response.data.settings) throw new Error("A sorveteria ainda não configurou o checkout.");
+  return response.data.settings;
+}

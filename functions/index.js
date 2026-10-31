@@ -10,6 +10,7 @@ const { projectAdminOrder } = require("./domain/admin-order-projection.cjs");
 const { projectDriverAssignment } = require("./domain/driver-assignment-projection.cjs");
 const { isActiveTenantMembership } = require("./domain/membership.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
+const {projectPublicTenant,projectPublicCheckoutSettings}=require("./domain/public-tenant.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
 if (!getApps().length) initializeApp();
@@ -456,6 +457,34 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
     }));
   });
   return { success: true };
+});
+
+/**
+ * Resolve a public storefront via private tenantSlugs mapping, return only allowlisted fields.
+ * Inactive tenants are intentionally indistinguishable from unknown slugs.
+ */
+exports.getPublicTenant=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const slug=requireText(request.data?.slug,"Endereco da sorveteria",64);
+  if(slug.length<2||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))
+    fail("invalid-argument","Endereco da sorveteria invalido.");
+  const mapping=await db.doc("tenantSlugs/"+slug).get();
+  const id=mapping.exists?mapping.data()?.tenantId:null;
+  if(typeof id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(id))return {tenant:null};
+  const snapshot=await db.doc("tenants/"+id).get();
+  const publicTenant=snapshot.exists?projectPublicTenant(id,snapshot.data()):null;
+  return {tenant:publicTenant?.slug===slug?publicTenant:null};
+});
+
+/** Public checkout gets a strictly projected, validated settings payload. */
+exports.getPublicCheckoutSettings=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenant,settings]=await Promise.all([
+    tenantRef.get(),tenantRef.collection("settings").doc("main").get(),
+  ]);
+  if(!tenant.exists||tenant.data().status!=="active")fail("not-found","Sorveteria indisponivel.");
+  return {settings:settings.exists?projectPublicCheckoutSettings(settings.data()):null};
 });
 
 /** Authenticated and bounded admin catalog snapshot over HTTPS for Owner UI. */

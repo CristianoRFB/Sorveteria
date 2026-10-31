@@ -1,5 +1,5 @@
-import { collection, getDocs, limit, query, where } from "firebase/firestore";
-import { assertFirebaseConfigured, db } from "@/lib/firebase";
+import { httpsCallable } from "firebase/functions";
+import { assertFirebaseConfigured,functions } from "@/lib/firebase";
 import type { Tenant } from "@/domain/tenant";
 import { tenantSlugSchema } from "@/schemas/tenant";
 
@@ -11,27 +11,10 @@ export function createTenantResolver(findActiveTenant: (slug: string) => Promise
     return tenant;
   };
 }
-
-const findActiveTenant = async (slug: string): Promise<Tenant | null> => {
+const findActiveTenant=async (slug:string):Promise<Tenant|null>=>{
   assertFirebaseConfigured();
-  // A query inclui status para que a leitura pública corresponda às Security Rules.
-  const q = query(
-    collection(db, "tenants"),
-    where("slug", "==", slug),
-    where("status", "==", "active"),
-    limit(1),
-  );
-
-  const result = await getDocs(q);
-  if (result.empty) return null;
-
-  const snap = result.docs[0];
-  const data = snap.data();
-  tenantSlugSchema.parse(data.slug);
-  if (data.status !== "active" || typeof data.branding?.displayName !== "string") {
-    throw new Error("Dados públicos da sorveteria inválidos.");
-  }
-  return { id: snap.id, ...data } as Tenant;
+  // The public profile is a server-projected allowlist, not a raw tenant document.
+  const call=httpsCallable<{slug:string},{tenant:Tenant|null}>(functions,"getPublicTenant",{timeout:20_000});
+  return (await call({slug})).data.tenant;
 };
-
-export const resolveTenantBySlug = createTenantResolver(findActiveTenant);
+export const resolveTenantBySlug=createTenantResolver(findActiveTenant);

@@ -4,7 +4,7 @@ import { useTenant } from "@/hooks/useTenant";
 import { useCart } from "@/hooks/useCart";
 import { cartSubtotal } from "@/domain/cart";
 import { createOrder, type CreatedOrder } from "@/services/orderService";
-import { loadTenantSettings, type TenantSettings } from "@/services/tenantSettings";
+import { loadPublicCheckoutSettings, type TenantSettings } from "@/services/tenantSettings";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { canUseTenantFeature, featureAccessMessage } from "@/domain/entitlements";
@@ -32,7 +32,7 @@ export function CheckoutPage() {
   useEffect(() => {
     if (!tenant) return;
     let active = true;
-    loadTenantSettings(tenant.id).then((value) => {
+    loadPublicCheckoutSettings(tenant.id).then((value) => {
       if (!active) return;
       setSettings(value);
       setPaymentMethodId(value.paymentMethods.find((method) => method.enabled)?.id || "");
