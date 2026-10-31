@@ -112,6 +112,19 @@ describe("Firestore Rules — tenant isolation", () => {
     await assertSucceeds(getDoc(doc(owner, "tenants/tenant-alpha/categories/gelatos")));
   });
 
+  it("bloqueia leitura bruta de tenant e settings para visitantes e clientes",async()=>{
+    const visitor=testEnv!.unauthenticatedContext().firestore();
+    const customer=signed("customer-alpha");
+    for(const client of [visitor,customer]){
+      await assertFails(getDoc(doc(client,"tenants/tenant-alpha")));
+      await assertFails(getDocs(query(collection(client,"tenants"),where("slug","==","tenant-alpha"))));
+      await assertFails(getDoc(doc(client,"tenants/tenant-alpha/settings/main")));
+    }
+    const owner=signed("owner-alpha");
+    await assertSucceeds(getDoc(doc(owner,"tenants/tenant-alpha")));
+    await assertSucceeds(getDoc(doc(owner,"tenants/tenant-alpha/settings/main")));
+  });
+
   it("cliente não altera role, preço, status, totais ou campos privilegiados", async () => {
     const db = signed("customer-alpha");
     await assertSucceeds(getDoc(doc(db, "tenants/tenant-alpha/orders/order-alpha")));

@@ -130,14 +130,9 @@ describe("fluxo essencial em dois tenants", () => {
   it("resolve tenant, recalcula pedido no servidor e fecha entrega com código single-use", async () => {
     await signIn("customer.alpha@demo.sorveteria.test");
 
-    const publicTenants = await getDocs(query(
-      collection(db, "tenants"),
-      where("slug", "==", "tenant-alpha"),
-      where("status", "==", "active"),
-    ));
-    expect(publicTenants.docs).toHaveLength(1);
-    const tenant = publicTenants.docs[0];
-    expect(tenant.id).toBe("tenant-alpha");
+    const publicTenants=await callable<{slug:string},{tenant:{id:string;slug:string}|null}>("getPublicTenant")({slug:"tenant-alpha"});
+    expect(publicTenants.data.tenant).toMatchObject({id:"tenant-alpha",slug:"tenant-alpha"});
+    await expect(getDoc(doc(db,"tenants/tenant-alpha"))).rejects.toMatchObject({code:"permission-denied"});
 
     const ownMembership = await getDoc(doc(db, "memberships/tenant-alpha_customer-alpha"));
     expect(ownMembership.data()).toMatchObject({ tenantId: "tenant-alpha", role: "customer", status: "active" });

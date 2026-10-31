@@ -60,12 +60,14 @@ service cloud.firestore {
     }
 
     match /tenants/{tenantId} {
-      allow get: if platformOwner() || tenantStaff(tenantId) || tenantDriver(tenantId) || resource.data.status == "active";
-      allow list: if platformOwner() || resource.data.status == "active";
+      // Public storefront uses getPublicTenant HTTPS projection, never raw metadata.
+      allow get: if platformOwner() || tenantStaff(tenantId) || tenantDriver(tenantId);
+      allow list: if platformOwner();
       allow create, update, delete: if false;
 
       match /settings/{settingsId} {
-        allow get: if platformOwner() || tenantStaff(tenantId) || (tenantIsActive(tenantId) && settingsId == "main");
+        // Customer checkout uses getPublicCheckoutSettings HTTPS allowlist.
+        allow get: if platformOwner() || tenantStaff(tenantId);
         allow list: if false;
         allow create, update, delete: if false;
       }
