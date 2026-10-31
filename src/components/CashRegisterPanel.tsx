@@ -11,6 +11,7 @@ export function CashRegisterPanel({tenantId}:{tenantId:string}){
   const [data,setData]=useState<CashSnapshot|null>(null);
   const [loading,setLoading]=useState(true);
   const [busy,setBusy]=useState(false);
+  const [refreshRequired,setRefreshRequired]=useState(false);
   const [error,setError]=useState<string|null>(null);
   const [notice,setNotice]=useState<string|null>(null);
   const [opening,setOpening]=useState("0.00");
@@ -35,14 +36,24 @@ export function CashRegisterPanel({tenantId}:{tenantId:string}){
       .finally(()=>{if(active)setLoading(false);});
     return ()=>{active=false;};
   },[tenantId]);
-  async function perform(op:()=>Promise<void>,success:string){
+  async function perform(op:()=>Promise<void>,success:string,onSuccess?:()=>void){
     setBusy(true);setError(null);setNotice(null);
+    let committed=false;
     try{
       await op();
+      committed=true;
       attempt.current=null;
+      onSuccess?.();
       await refresh();
+      setRefreshRequired(false);
       setNotice(success);
-    }catch(e){setError(e instanceof Error?e.message:"Operação de caixa não concluída.");
+    }catch(e){
+      if(committed){
+        setRefreshRequired(true);
+        setError("Operação confirmada, mas a atualização do painel falhou. Clique em Atualizar antes de lançar outra movimentação.");
+      }else{
+        setError(e instanceof Error?e.message:"Operação de caixa não concluída.");
+      }
     }finally{setBusy(false);}
   }
   function open(event:FormEvent<HTMLFormElement>){
@@ -58,8 +69,7 @@ export function CashRegisterPanel({tenantId}:{tenantId:string}){
     void perform(async()=>{await recordCashMovement({tenantId,shiftId:active.id,
       kind,amountCents,note:description,
       requestId:requestId(JSON.stringify(["movement",active.id,kind,amountCents,description]))});},
-      "Lançamento manual registrado e auditado.")
-      ;
+      "Lançamento manual registrado e auditado.",()=>{setAmount("");setNote("");});
   }
   function close(event:FormEvent<HTMLFormElement>){
     event.preventDefault();
@@ -67,7 +77,7 @@ export function CashRegisterPanel({tenantId}:{tenantId:string}){
     const countedCents=centsFromInput(counted);
     if(!window.confirm("Conferiu o dinheiro contado? O fechamento não pode ser desfeito."))return;
     void perform(async()=>{await closeCashShift(tenantId,active.id,countedCents);},
-      "Turno encerrado e diferença de fechamento registrada.");
+      "Turno encerrado e diferença de fechamento registrada.",()=>setCounted(""));
   }
   if(loading)return <LoadingState label="Carregando caixa operacional..."/>;
   if(!data)return <section className="admin-section">
@@ -85,12 +95,13 @@ export function CashRegisterPanel({tenantId}:{tenantId:string}){
       Pedidos, PIX, cartão e taxas não são importados automaticamente;
       estes valores não representam faturamento nem conciliação bancária.</p>
     {error&&<p className="error-text" role="alert">{error}</p>}
+    {refreshRequired&&<p className="notice" role="status">Nenhum novo lançamento será aceito nesta tela até atualizar o estado do caixa.</p>}
     {notice&&<p className="notice" role="status">{notice}</p>}
     {!shift?<form className="form-grid cash-form" onSubmit={open}>
       <h3>Abrir turno de caixa</h3>
       <label>Troco inicial (R$)<input type="number" required min="0" max="50000"
         step="0.01" value={opening} onChange={e=>setOpening(e.target.value)}/></label>
-      <button className="button primary" type="submit" disabled={busy}>
+      <button className="button primary" type="submit" disabled={busy||refreshRequired}>
         {busy?"Registrando...":"Abrir caixa"}</button>
     </form>:<>
       <div className="cash-metrics">
@@ -110,7 +121,7 @@ export function CashRegisterPanel({tenantId}:{tenantId:string}){
             value={amount} onChange={e=>setAmount(e.target.value)}/></label>
           <label>Motivo / referência (3 a 160 caracteres)<textarea required minLength={3} maxLength={160} rows={3}
             value={note} onChange={e=>setNote(e.target.value)}/></label>
-          <button type="submit" className="button primary" disabled={busy}>
+          <button type="submit" className="button primary" disabled={busy||refreshRequired}>
             {busy?"Registrando...":"Registrar lançamento"}</button>
         </form>
         <form className="form-grid cash-form" onSubmit={close}>
@@ -121,7 +132,7 @@ export function CashRegisterPanel({tenantId}:{tenantId:string}){
             value={counted} onChange={e=>setCounted(e.target.value)}/></label>
           {counted!==""&&Number.isFinite(centsFromInput(counted))&&
             <p className="notice">Diferença prevista: {money(centsFromInput(counted)-shift.expectedCents)}</p>}
-          <button type="submit" className="button secondary" disabled={busy}>
+          <button type="submit" className="button secondary" disabled={busy||refreshRequired}>
             {busy?"Processando...":"Conferir e fechar caixa"}</button>
         </form>
       </div>
