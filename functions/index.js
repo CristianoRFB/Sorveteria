@@ -13,6 +13,7 @@ const { isActiveTenantMembership } = require("./domain/membership.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const {projectPublicTenant,projectPublicCheckoutSettings}=require("./domain/public-tenant.cjs");
 const {buildBasicSalesSummary}=require("./domain/sales-summary.cjs");
+const {validateDeliveryZones,quoteDeliveryZone}=require("./domain/delivery-zones.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
 if (!getApps().length) initializeApp();
@@ -478,6 +479,53 @@ exports.updateTenantSettings = onCall({ region: REGION }, async (request) => {
   return { success: true };
 });
 
+/** Manager-only configuration for Pro/Premium neighborhood-based delivery fees. */
+exports.updateTenantDeliveryZones=onCall({region:REGION},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  let zones;
+  try{zones=validateDeliveryZones(request.data?.zones);}
+  catch(e){fail("invalid-argument",e.message);}
+  const tenantRef=db.doc("tenants/"+tenantId);
+  await db.runTransaction(async(transaction)=>{
+    const tenant=await transaction.get(tenantRef);
+    if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+    const member=await requireTenantManager(transaction,tenantId,auth);
+    requireCommercialFeature(tenant.data(),"delivery_zones");
+    transaction.set(tenantRef.collection("settings").doc("deliveryZones"),
+      {zones,updatedAt:FieldValue.serverTimestamp()});
+    transaction.create(tenantRef.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:member?.data.role||"platform_owner",
+      action:"delivery_zones.updated",entityType:"delivery_zones",
+      entityId:"deliveryZones",metadata:{zoneCount:zones.length},
+    }));
+  });
+  return {success:true,zoneCount:zones.length};
+});
+/** Only names, fee and neighborhood lists reach the public checkout; no raw settings. */
+exports.getTenantDeliveryZones=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  const ref=db.doc("tenants/"+tenantId);
+  const [tenant,member,zonesSnapshot]=await Promise.all([
+    ref.get(),auth.token.platform_owner===true?Promise.resolve(null):
+      db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+    ref.collection("settings").doc("deliveryZones").get(),
+  ]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const data=member?.exists?member.data():null;
+    if(!isActiveTenantMembership(data,tenantId,auth.uid)
+      ||!["tenant_owner","tenant_admin"].includes(data.role))
+      fail("permission-denied","Somente gestores podem configurar zonas.");
+  }
+  requireCommercialFeature(tenant.data(),"delivery_zones");
+  try{return {zones:validateDeliveryZones(zonesSnapshot.exists?zonesSnapshot.data().zones:[])};}
+  catch(e){fail("failed-precondition","Configuração de zonas inválida.");}
+});
+
 /**
  * Resolve a public storefront via private tenantSlugs mapping, return only allowlisted fields.
  * Inactive tenants are intentionally indistinguishable from unknown slugs.
@@ -499,11 +547,19 @@ exports.getPublicCheckoutSettings=onCall({region:REGION,maxInstances:20},async(r
   const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
   if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
   const tenantRef=db.doc("tenants/"+tenantId);
-  const [tenant,settings]=await Promise.all([
+  const [tenant,settings,zonesSnapshot]=await Promise.all([
     tenantRef.get(),tenantRef.collection("settings").doc("main").get(),
+    tenantRef.collection("settings").doc("deliveryZones").get(),
   ]);
   if(!tenant.exists||tenant.data().status!=="active")fail("not-found","Sorveteria indisponivel.");
-  return {settings:settings.exists?projectPublicCheckoutSettings(settings.data()):null};
+  const checkout=settings.exists?projectPublicCheckoutSettings(settings.data()):null;
+  if(!checkout)return {settings:null};
+  if(!evaluateFeature(tenant.data(),"delivery_zones",{demoAllowed:process.env.FUNCTIONS_EMULATOR==="true"}).allowed)
+    return {settings:checkout};
+  let zones;
+  try{zones=validateDeliveryZones(zonesSnapshot.exists?zonesSnapshot.data().zones:[]);}
+  catch(e){fail("failed-precondition","Configuração de zonas inválida.");}
+  return {settings:{...checkout,deliveryZones:zones}};
 });
 
 /** Authenticated and bounded admin catalog snapshot over HTTPS for Owner UI. */
@@ -733,6 +789,7 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
   const orderRef = tenantRef.collection("orders").doc();
   const trackingCode = generatedCode("SV-");
   const deliveryCode = fulfillmentMode === "delivery" ? generatedCode() : null;
+  const zonesRef=tenantRef.collection("settings").doc("deliveryZones");
   const trackingRef = tenantRef.collection("publicOrderTracking").doc(trackingCode);
   const productRefs = data.items.map((item) => {
     if (!item || typeof item !== "object") fail("invalid-argument", "Item do pedido inválido.");
@@ -743,9 +800,9 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
   await db.runTransaction(async (transaction) => {
     const snapshots = await Promise.all([
       transaction.get(tenantRef), transaction.get(tenantRef.collection("settings").doc("main")), transaction.get(trackingRef),
-      ...productRefs.map((ref) => transaction.get(ref)),
+      transaction.get(zonesRef),...productRefs.map((ref) => transaction.get(ref)),
     ]);
-    const [tenantSnapshot, settingsSnapshot, trackingSnapshot, ...productSnapshots] = snapshots;
+    const [tenantSnapshot, settingsSnapshot, trackingSnapshot, zonesSnapshot, ...productSnapshots] = snapshots;
     if (!tenantSnapshot.exists || tenantSnapshot.data().status !== "active") fail("failed-precondition", "Sorveteria indisponível para novos pedidos.");
     // Atomic: competing transactions cannot both create the same marker.
     const existingRequest = idempotencyRef ? await transaction.get(idempotencyRef) : null;
@@ -792,7 +849,17 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
         lineTotalCents,
       });
     }
-    const deliveryFeeCents = fulfillmentMode === "delivery" ? settings.deliveryFeeCents : 0;
+    let zoneQuote=null;
+    if(fulfillmentMode==="delivery" && evaluateFeature(tenant,"delivery_zones",
+      {demoAllowed:process.env.FUNCTIONS_EMULATOR==="true"}).allowed){
+      let zones;
+      try{zones=validateDeliveryZones(zonesSnapshot.exists?zonesSnapshot.data().zones:[]);}
+      catch(e){fail("failed-precondition","Configuração de zonas inválida. Consulte a sorveteria.");}
+      zoneQuote=quoteDeliveryZone(zones,address.neighborhood,settings.deliveryFeeCents);
+      if(!zoneQuote)fail("failed-precondition","Entrega indisponível para este bairro.");
+    }
+    const deliveryFeeCents=fulfillmentMode==="delivery"
+      ?(zoneQuote?.feeCents??settings.deliveryFeeCents):0;
     const totalCents = subtotalCents + deliveryFeeCents;
     const createdAt = FieldValue.serverTimestamp();
     const order = {
@@ -801,6 +868,7 @@ exports.createOrder = onCall({ region: REGION, maxInstances: 20 }, async (reques
       customerId: request.auth?.uid || null,
       customer,
       address,
+      deliveryZoneId:zoneQuote?.zoneId??null,
       fulfillmentMode,
       status: "received",
       source: { channel: "web" },

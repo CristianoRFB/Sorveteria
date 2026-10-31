@@ -18,7 +18,7 @@
   "basic_sales_summary": "implemented",
   "kds": "implemented",
   "advanced_delivery_management": "not_implemented",
-  "delivery_zones": "not_implemented",
+  "delivery_zones": "implemented",
   "table_qr": "not_implemented",
   "cash_register": "not_implemented",
   "operational_finance": "not_implemented",
