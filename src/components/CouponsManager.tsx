@@ -4,6 +4,8 @@ import {LoadingState} from "@/components/LoadingState";
 
 const empty:CouponInput={code:"",kind:"percent",value:10,minSubtotalCents:0,maxUses:null,active:true,expiresAt:null};
 const money=(v:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v/100);
+const couponInput=(c:TenantCoupon):CouponInput=>({code:c.code,kind:c.kind,value:c.value,
+  minSubtotalCents:c.minSubtotalCents,maxUses:c.maxUses,active:c.active,expiresAt:c.expiresAt});
 export function CouponsManager({tenantId}:{tenantId:string}){
   const [coupons,setCoupons]=useState<TenantCoupon[]>([]);
   const [draft,setDraft]=useState<CouponInput>({...empty});
@@ -36,8 +38,7 @@ export function CouponsManager({tenantId}:{tenantId:string}){
   async function toggle(coupon:TenantCoupon){
     setPending(true);setError(null);setNotice(null);
     try{
-      const {usedCount:_usedCount,...config}=coupon;
-      await saveTenantCoupon(tenantId,{...config,active:!coupon.active});
+      await saveTenantCoupon(tenantId,{...couponInput(coupon),active:!coupon.active});
       await refresh();setNotice(coupon.active?"Cupom desativado.":"Cupom reativado.");
     }catch(e){setError(e instanceof Error?e.message:"Não foi possível alterar o cupom.");}
     finally{setPending(false);}
@@ -58,7 +59,7 @@ export function CouponsManager({tenantId}:{tenantId:string}){
       <div className="actions"><span className={`status-pill ${c.active?"status-active":"status-cancelled"}`}>
         {c.active?"Ativo":"Inativo"}</span>
         <button type="button" className="button secondary" disabled={pending}
-          onClick={()=>{const {usedCount:_usedCount,...config}=c;setDraft(config);setEditing(true);setError(null);setNotice(null);}}>
+          onClick={()=>{setDraft(couponInput(c));setEditing(true);setError(null);setNotice(null);}}>
           Editar</button>
         <button type="button" className="button secondary" disabled={pending}
           onClick={()=>void toggle(c)}>{c.active?"Desativar":"Ativar"}</button></div>
