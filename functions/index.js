@@ -1,7 +1,7 @@
 const { randomBytes, timingSafeEqual } = require("node:crypto");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
-const { FieldValue, FieldPath, getFirestore } = require("firebase-admin/firestore");
+const { FieldValue, FieldPath, AggregateField, Timestamp, getFirestore } = require("firebase-admin/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { canTransitionDelivery, codeFromBytes, deliveryCodeHash, isDeliveryCodeValid } = require("./domain/delivery.cjs");
 const { evaluateFeature, getLimit, planCatalog, featureAvailability } = require("./domain/entitlements.cjs");
@@ -11,6 +11,7 @@ const { projectDriverAssignment } = require("./domain/driver-assignment-projecti
 const { isActiveTenantMembership } = require("./domain/membership.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const {projectPublicTenant,projectPublicCheckoutSettings}=require("./domain/public-tenant.cjs");
+const {buildBasicSalesSummary}=require("./domain/sales-summary.cjs");
 const { normalizeCheckoutRequestId, checkoutDocumentId, checkoutFingerprint, replayCheckout } = require("./domain/checkout-idempotency.cjs");
 
 if (!getApps().length) initializeApp();
@@ -874,6 +875,55 @@ exports.getDriverAssignments = onCall({region:REGION,maxInstances:20},async(requ
       orderSnapshot.exists ? orderSnapshot.data() : null);
   }));
   return {deliveries:rows.filter(Boolean)};
+});
+
+/** Read-only sales summary, calculated from index aggregations across all orders in a rolling window.
+ * Only the caller's authorized tenant is queried. No customer fields leave the server.
+ */
+exports.getTenantSalesSummary=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request);
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant invalido.");
+  const days=request.data?.days;
+  if(days!==7&&days!==30)fail("invalid-argument","Periodo deve ser 7 ou 30 dias.");
+  const tenantRef=db.doc("tenants/"+tenantId);
+  const [tenantSnapshot,memberSnapshot]=await Promise.all([
+    tenantRef.get(),
+    auth.token.platform_owner===true ? Promise.resolve(null) :
+      db.doc("memberships/"+tenantId+"_"+auth.uid).get(),
+  ]);
+  if(!tenantSnapshot.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const member=memberSnapshot?.exists?memberSnapshot.data():null;
+    if(!isActiveTenantMembership(member,tenantId,auth.uid)||!ADMIN_ROLES.has(member.role))
+      fail("permission-denied","Acesso ao resumo de pedidos nao autorizado.");
+  }
+  requireCommercialFeature(tenantSnapshot.data(),"basic_sales_summary");
+  const endMs=Date.now();
+  const startMs=endMs-days*24*60*60*1000;
+  const orders=tenantRef.collection("orders")
+    .where("createdAt",">=",Timestamp.fromMillis(startMs))
+    .where("createdAt","<",Timestamp.fromMillis(endMs));
+  const [all,completed,cancelled]=await Promise.all([
+    orders.count().get(),
+    orders.where("status","in",["delivered","picked_up"])
+      .aggregate({count:AggregateField.count(),amountCents:AggregateField.sum("money.totalCents")}).get(),
+    orders.where("status","==","cancelled").count().get(),
+  ]);
+  let summary;
+  try {
+    summary=buildBasicSalesSummary({
+      orderCount:all.data().count,
+      completedCount:completed.data().count,
+      cancelledCount:cancelled.data().count,
+      completedAmountCents:completed.data().amountCents??0,
+    });
+  } catch (error) {
+    console.error("Invalid aggregate results for a tenant sales summary", {tenantId,reason:String(error)});
+    fail("internal","Nao foi possivel calcular o resumo de pedidos.");
+  }
+  return {days,periodStart:new Date(startMs).toISOString(),
+    periodEnd:new Date(endMs).toISOString(),...summary};
 });
 
 exports.getTenantOperationsSnapshot = onCall({ region: REGION, maxInstances: 20 }, async (request) => {
