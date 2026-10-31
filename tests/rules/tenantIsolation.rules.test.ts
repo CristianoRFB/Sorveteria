@@ -156,9 +156,11 @@ describe("Firestore Rules — tenant isolation", () => {
     await assertFails(getDoc(doc(anonymous, "tenants/tenant-suspended/publicOrderTracking/SV-ABCDEFG2")));
   });
 
-  it("expõe apenas a projeção de tracking por get e impede listagem e escrita", async () => {
+  it("bloqueia tracking bruto; clientes usam somente a API pública", async () => {
     const anonymous = testEnv!.unauthenticatedContext().firestore();
-    await assertSucceeds(getDoc(doc(anonymous, "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
+    await assertFails(getDoc(doc(anonymous, "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
+    await assertFails(getDoc(doc(signed("customer-alpha"), "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
+    await assertSucceeds(getDoc(doc(signed("owner-alpha"), "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG2")));
     await assertFails(getDocs(collection(anonymous, "tenants/tenant-alpha/publicOrderTracking")));
     await assertFails(setDoc(doc(anonymous, "tenants/tenant-alpha/publicOrderTracking/SV-ABCDEFG3"), { publicCode: "SV-ABCDEFG3", status: "delivered" }));
   });

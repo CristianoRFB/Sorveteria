@@ -99,8 +99,9 @@ service cloud.firestore {
       }
 
       match /publicOrderTracking/{publicCode} {
-        allow get: if tenantIsActive(tenantId)
-          && resource.data.publicCode == publicCode;
+        // A public code grants access only to the allowlisted HTTPS tracking projection.
+        // Raw documents may gain sensitive server fields and must remain private.
+        allow get: if platformOwner() || tenantStaff(tenantId);
         allow list, create, update, delete: if false;
       }
 

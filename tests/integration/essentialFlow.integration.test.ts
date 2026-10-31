@@ -170,9 +170,13 @@ describe("fluxo essencial em dois tenants", () => {
     expect(orderSnapshot.data()?.items[0]).toMatchObject({ unitPriceCents: 1200, lineTotalCents: 1200 });
 
     const trackingRef = doc(db, "tenants/tenant-alpha/publicOrderTracking", publicCode);
-    const tracking = await getDoc(trackingRef);
-    expect(tracking.exists()).toBe(true);
-    expect(Object.keys(tracking.data() || {}).sort()).toEqual(["createdAt", "estimatedMinutes", "fulfillmentMode", "publicCode", "status", "timeline", "updatedAt"].sort());
+    const publicTracking = callable<{tenantId:string;publicCode:string},{tracking:{
+      publicCode:string;status:string;fulfillmentMode:string;timeline:Array<{status:string;at:string}>;estimatedMinutes?:number
+    }|null}>("getPublicOrderTracking");
+    const tracking = (await publicTracking({tenantId:"tenant-alpha",publicCode})).data.tracking;
+    expect(tracking).toMatchObject({publicCode,status:"received",fulfillmentMode:"delivery"});
+    expect(Object.keys(tracking || {}).sort()).toEqual(["estimatedMinutes", "fulfillmentMode", "publicCode", "status", "timeline"].sort());
+    await expect(getDoc(trackingRef)).rejects.toMatchObject({code:"permission-denied"});
     await expect(getDoc(doc(db, "tenants/tenant-alpha/privateDeliveryCodes", orderId))).rejects.toBeDefined();
 
     await signIn("owner.alpha@demo.sorveteria.test");
@@ -225,9 +229,9 @@ describe("fluxo essencial em dois tenants", () => {
     await signIn("owner.alpha@demo.sorveteria.test");
     const deliveredOrder = await getDoc(orderRef);
     expect(deliveredOrder.data()?.status).toBe("delivered");
-    const deliveredTracking = await getDoc(trackingRef);
-    expect(deliveredTracking.data()?.status).toBe("delivered");
-    expect(deliveredTracking.data()).not.toHaveProperty("customer");
-    expect(deliveredTracking.data()).not.toHaveProperty("address");
+    const deliveredTracking=(await publicTracking({tenantId:"tenant-alpha",publicCode})).data.tracking;
+    expect(deliveredTracking?.status).toBe("delivered");
+    expect(deliveredTracking).not.toHaveProperty("customer");
+    expect(deliveredTracking).not.toHaveProperty("address");
   });
 });
