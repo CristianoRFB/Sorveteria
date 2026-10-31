@@ -13,11 +13,12 @@ import type { Membership } from "@/domain/membership";
 import { loadTenantSettings, saveTenantSettings, type TenantSettings } from "@/services/tenantSettings";
 import { LoadingState } from "@/components/LoadingState";
 import { SalesSummaryPanel } from "@/components/SalesSummaryPanel";
+import {IntermediateReportsPanel} from "@/components/IntermediateReportsPanel";
 import { DeliveryZonesManager } from "@/components/DeliveryZonesManager";
 import { CouponsManager } from "@/components/CouponsManager";
 import { canUseTenantFeature } from "@/domain/entitlements";
 
-type Tab = "orders" | "catalog" | "settings" | "sales" | "coupons";
+type Tab = "orders" | "catalog" | "settings" | "sales" | "coupons" | "reports";
 type OptionDraft = { id: string; name: string; priceDeltaCents: number; available: boolean };
 type GroupDraft = { id: string; name: string; required: boolean; minSelections: number; maxSelections: number; options: OptionDraft[] };
 type ProductDraft = { name: string; description: string; imageUrl: string; categoryId: string; kind: CatalogProduct["kind"]; price: string; available: boolean; optionGroups: GroupDraft[] };
@@ -74,6 +75,7 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
   const canUseKitchen = canUseTenantFeature(tenant, "kds");
   const canUseDeliveryZones = canUseTenantFeature(tenant,"delivery_zones");
   const canManageCoupons=canManage&&canUseTenantFeature(tenant,"coupons");
+  const canUseReports=canManage&&canUseTenantFeature(tenant,"intermediate_reports");
   const [tab, setTab] = useState<Tab>("orders");
 
   return (
@@ -85,6 +87,8 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
       <div className="admin-nav" role="tablist" aria-label="Seções do painel">
         <button role="tab" aria-selected={tab === "orders"} className={tab === "orders" ? "active" : ""} onClick={() => setTab("orders")}>Pedidos</button>
         {canReadSales && <button role="tab" aria-selected={tab === "sales"} className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Resumo de vendas</button>}
+        {canUseReports && <button role="tab" aria-selected={tab==="reports"}
+          className={tab==="reports"?"active":""} onClick={()=>setTab("reports")}>Relatórios</button>}
         {canManageCoupons && <button role="tab" aria-selected={tab === "coupons"} className={tab === "coupons"?"active":""} onClick={()=>setTab("coupons")}>Cupons</button>}
         {canManage && <button role="tab" aria-selected={tab === "catalog"} className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>Catálogo</button>}
         {canManage && <button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>Checkout e equipe</button>}
@@ -95,6 +99,7 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
       {(!canManage || tab === "orders") && <OrderManager tenantId={tenant.id} canResetDeliveryCode={isPlatformOwner || scopedRole === "tenant_owner"} />}
       {canReadSales && tab === "sales" && <SalesSummaryPanel tenantId={tenant.id} />}
       {canManageCoupons && tab === "coupons" && <CouponsManager tenantId={tenant.id} />}
+      {canUseReports && tab==="reports" && <IntermediateReportsPanel tenantId={tenant.id}/>}
       {canManage && tab === "catalog" && <CatalogManager tenantId={tenant.id} />}
       {tab === "settings" && canManage && <><SettingsEditor tenantId={tenant.id} />{canUseDeliveryZones&&<DeliveryZonesManager tenantId={tenant.id}/>}<TeamManager tenantId={tenant.id} /></>}
     </main>

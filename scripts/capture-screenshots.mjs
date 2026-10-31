@@ -303,6 +303,9 @@ try {
     console.log(`Usuário após login Owner Alpha: ${identity}`);
   }
   await waitText("Painel do negócio");
+  // Essential tenants cannot see Pro/Premium reporting controls.
+  if(await evaluate("Boolean([...document.querySelectorAll(\"[role=tab]\")].find(x=>x.innerText.trim()===\"Relatórios\"))"))
+    throw new Error("O relatório Pro está visível no plano Essencial.");
   await waitText(publicCode, 30000);
   await capture("tenant-owner-pedidos.png");
   for (const status of ["Marcar: Confirmado", "Marcar: Em preparo", "Marcar: Pronto"]) {

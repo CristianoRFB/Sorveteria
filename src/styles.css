@@ -306,3 +306,22 @@ label { display: grid; gap: 8px; color: #51475d; font-size: .9rem; font-weight: 
 .coupon-editor {padding-top:16px;border-top:1px solid #eadff0;}
 .coupon-checkout-input {display:grid;gap:7px;margin:4px 0;}
 .coupon-checkout-input small {color:#51475d;line-height:1.5;}
+
+/* Bounded intermediate operational reports; never customer PII. */
+.reports-layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr);gap:16px;margin:20px 0;}
+.reports-card{min-width:0;border:1px solid #eadff0;border-radius:16px;padding:20px;background:#fff;}
+.reports-card h3{margin:0 0 12px;}
+.reports-trend{display:grid;gap:8px;max-height:420px;overflow-y:auto;margin-top:16px;}
+.reports-trend-row{display:grid;grid-template-columns:75px minmax(60px,1fr) 78px;align-items:center;gap:10px;}
+.reports-trend-row time,.reports-trend-row span{font-size:.8rem;font-variant-numeric:tabular-nums;}
+.reports-trend-row span{text-align:right;}
+.reports-bar-track{height:15px;border-radius:8px;background:#f1e9ff;overflow:hidden;}
+.reports-bar-fill{height:100%;background:var(--tenant-primary,#6d28d9);border-radius:8px;}
+.reports-fulfillment{display:grid;gap:8px;margin:12px 0 22px;}
+.reports-fulfillment p{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;margin:0;}
+.reports-fulfillment small{color:#51475d;}
+.reports-products{display:grid;gap:12px;padding-left:22px;margin:16px 0;}
+.reports-products li{padding-left:4px;}
+.reports-products li strong{float:right;}
+@media(max-width:850px){.reports-layout{grid-template-columns:1fr;}}
+@media(max-width:500px){.reports-card{padding:13px;}.reports-trend-row{grid-template-columns:64px minmax(50px,1fr) 67px;gap:5px;}}
