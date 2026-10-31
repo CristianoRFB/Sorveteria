@@ -303,6 +303,8 @@ try {
     console.log(`Usuário após login Owner Alpha: ${identity}`);
   }
   await waitText("Painel do negócio");
+  if(await evaluate("Boolean([...document.querySelectorAll(\"[role=tab]\")].find(x=>x.innerText.trim()===\"Caixa\"))"))
+    throw new Error("Caixa Pro/Premium foi exibido no plano Essencial.");
   // Essential tenants cannot see Pro/Premium reporting controls.
   if(await evaluate("Boolean([...document.querySelectorAll(\"[role=tab]\")].find(x=>x.innerText.trim()===\"Relatórios\"))"))
     throw new Error("O relatório Pro está visível no plano Essencial.");

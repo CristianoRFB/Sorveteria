@@ -325,3 +325,21 @@ label { display: grid; gap: 8px; color: #51475d; font-size: .9rem; font-weight: 
 .reports-products li strong{float:right;}
 @media(max-width:850px){.reports-layout{grid-template-columns:1fr;}}
 @media(max-width:500px){.reports-card{padding:13px;}.reports-trend-row{grid-template-columns:64px minmax(50px,1fr) 67px;gap:5px;}}
+
+/* Pro/Premium manual cash register: readable, responsive, no payment settlement. */
+.cash-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:22px 0;}
+.cash-metrics>div{display:grid;gap:8px;background:#fff;padding:18px;border-radius:16px;border:1px solid #eadff0;}
+.cash-metrics span{font-size:.86rem;color:#554c61;}
+.cash-metrics strong{font-size:1.35rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+.cash-layout{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:22px 0;align-items:start;}
+.cash-form{padding:20px;border-radius:16px;border:1px solid #eadff0;background:#fff;}
+.cash-form h3{margin:0;}
+.cash-form textarea{width:100%;resize:vertical;}
+.cash-movements,.cash-history{margin:20px 0;}
+.cash-movements ul,.cash-history ul{padding:0;list-style:none;display:grid;gap:10px;}
+.cash-movements li,.cash-history li{background:#fff;border:1px solid #eadff0;border-radius:12px;
+  padding:14px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.cash-movements li>div,.cash-history li>div{display:grid;gap:4px;}
+.cash-history li>div:last-child{text-align:right;}
+.cash-movements li span,.cash-movements li small,.cash-history li span{color:#554c61;font-size:.85rem;}
+@media(max-width:760px){.cash-layout{grid-template-columns:1fr;}.cash-form{padding:14px;}}
