@@ -89,6 +89,17 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      // Physical cash register: callable-only with membership, entitlement and audit checks.
+      match /cashRegister/{stateId} {
+        allow read, write: if false;
+      }
+      match /cashShifts/{shiftId} {
+        allow read, write: if false;
+        match /movements/{movementId} {
+          allow read, write: if false;
+        }
+      }
+
       match /orders/{orderId} {
         // Drivers use getDriverAssignments HTTPS instead of raw order PII.
         allow get: if platformOwner() || tenantStaff(tenantId)

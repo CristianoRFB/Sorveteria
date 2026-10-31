@@ -13,6 +13,7 @@ const { isActiveTenantMembership } = require("./domain/membership.cjs");
 const { projectPublicCatalog } = require("./domain/public-catalog.cjs");
 const {projectPublicTenant,projectPublicCheckoutSettings}=require("./domain/public-tenant.cjs");
 const {buildBasicSalesSummary}=require("./domain/sales-summary.cjs");
+const {validateCashOpening,validateCashMovement,validateCashClosing,nextCashBalance,projectCashShift,projectCashMovement}=require("./domain/cash-register.cjs");
 const {LIMIT:INTERMEDIATE_REPORT_LIMIT,buildIntermediateReport}=require("./domain/intermediate-report.cjs");
 const {normalizeCouponCode,validateCouponConfig,calculateCouponDiscount}=require("./domain/coupons.cjs");
 const {validateDeliveryZones,quoteDeliveryZone}=require("./domain/delivery-zones.cjs");
@@ -1124,6 +1125,174 @@ exports.getTenantIntermediateReport=onCall({region:REGION,maxInstances:10},async
     console.error("Invalid operational report", {tenantId,reason:String(error)});
     fail("internal","Não foi possível calcular o relatório.");
   }
+});
+
+/** Manual, audited physical cash register. No automatic settlement or linkage to web orders. */
+function cashTenantId(request){
+  const tenantId=requireText(request.data?.tenantId,"Sorveteria",128);
+  if(!/^[A-Za-z0-9_-]{1,128}$/.test(tenantId))fail("invalid-argument","Tenant inválido.");
+  return tenantId;
+}
+async function requireCashOperator(tx,tenantId,auth){
+  if(auth.token.platform_owner===true)return "platform_owner";
+  const member=await readActiveMembership(tx,tenantId,auth.uid);
+  if(!["tenant_owner","tenant_admin","cashier"].includes(member.data.role))
+    fail("permission-denied","Perfil sem acesso ao caixa.");
+  return member.data.role;
+}
+async function assertCashTenant(tx,ref,tenantId,auth){
+  const tenant=await tx.get(ref);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  const role=await requireCashOperator(tx,tenantId,auth);
+  requireCommercialFeature(tenant.data(),"cash_register");
+  return role;
+}
+exports.openTenantCashShift=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request),tenantId=cashTenantId(request);
+  let input;try{input=validateCashOpening({
+    openingCents:request.data?.openingCents,requestId:request.data?.requestId,
+  });}catch(e){fail("invalid-argument",e.message);}
+  const ref=db.doc("tenants/"+tenantId),stateRef=ref.collection("cashRegister").doc("state");
+  const shiftRef=ref.collection("cashShifts").doc("sh_"+input.requestId);
+  let result;
+  await db.runTransaction(async tx=>{
+    const role=await assertCashTenant(tx,ref,tenantId,auth);
+    const [state,previous]=await Promise.all([tx.get(stateRef),tx.get(shiftRef)]);
+    if(previous.exists){
+      const prior=previous.data();
+      if(prior.openedBy!==auth.uid||prior.openingCents!==input.openingCents)
+        fail("already-exists","Tentativa de abertura reutilizada com outros dados.");
+      result={shiftId:shiftRef.id,replayed:true};return;
+    }
+    if(state.exists&&state.data().activeShiftId)
+      fail("failed-precondition","Já existe um turno de caixa aberto.");
+    const at=FieldValue.serverTimestamp();
+    tx.create(shiftRef,{tenantId,status:"open",openingCents:input.openingCents,
+      inflowCents:0,outflowCents:0,expectedCents:input.openingCents,
+      openedBy:auth.uid,openedAt:at,updatedAt:at});
+    tx.set(stateRef,{activeShiftId:shiftRef.id,updatedAt:at});
+    tx.create(ref.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:role,action:"cash_shift.opened",
+      entityType:"cash_shift",entityId:shiftRef.id,
+      metadata:{openingCents:input.openingCents},
+    }));
+    result={shiftId:shiftRef.id,replayed:false};
+  });
+  return result;
+});
+exports.recordTenantCashMovement=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request),tenantId=cashTenantId(request);
+  let input;try{input=validateCashMovement({
+    shiftId:request.data?.shiftId,requestId:request.data?.requestId,
+    kind:request.data?.kind,amountCents:request.data?.amountCents,note:request.data?.note,
+  });}catch(e){fail("invalid-argument",e.message);}
+  const ref=db.doc("tenants/"+tenantId),stateRef=ref.collection("cashRegister").doc("state");
+  const shiftRef=ref.collection("cashShifts").doc(input.shiftId);
+  const movementRef=shiftRef.collection("movements").doc(input.requestId);
+  let result;
+  await db.runTransaction(async tx=>{
+    const role=await assertCashTenant(tx,ref,tenantId,auth);
+    const [state,shift,previous]=await Promise.all([
+      tx.get(stateRef),tx.get(shiftRef),tx.get(movementRef),
+    ]);
+    if(previous.exists){
+      const prior=previous.data();
+      if(prior.kind!==input.kind||prior.amountCents!==input.amountCents
+        ||prior.note!==input.note||prior.createdBy!==auth.uid)
+        fail("already-exists","Tentativa de movimentação reutilizada com outros dados.");
+      result={shiftId:input.shiftId,replayed:true,
+        expectedCents:shift.exists?shift.data().expectedCents:null};
+      return;
+    }
+    if(!state.exists||state.data().activeShiftId!==input.shiftId
+      ||!shift.exists||shift.data().status!=="open")
+      fail("failed-precondition","Este turno de caixa não está aberto.");
+    const current=shift.data();
+    const balance=nextCashBalance(current.expectedCents,input.kind,input.amountCents);
+    if(balance===null)
+      fail("failed-precondition","Movimentação excede o saldo disponível ou o limite operacional.");
+    const at=FieldValue.serverTimestamp();
+    tx.create(movementRef,{tenantId,shiftId:input.shiftId,kind:input.kind,
+      amountCents:input.amountCents,note:input.note,createdBy:auth.uid,createdAt:at});
+    tx.update(shiftRef,{expectedCents:balance,
+      inflowCents:current.inflowCents+(input.kind==="inflow"?input.amountCents:0),
+      outflowCents:current.outflowCents+(input.kind==="outflow"?input.amountCents:0),
+      updatedAt:at});
+    tx.create(ref.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:role,action:"cash_movement.created",
+      entityType:"cash_movement",entityId:input.requestId,
+      metadata:{shiftId:input.shiftId,kind:input.kind,amountCents:input.amountCents},
+    }));
+    result={shiftId:input.shiftId,replayed:false,expectedCents:balance};
+  });
+  return result;
+});
+exports.closeTenantCashShift=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request),tenantId=cashTenantId(request);
+  let input;try{input=validateCashClosing({
+    shiftId:request.data?.shiftId,countedCents:request.data?.countedCents,
+  });}catch(e){fail("invalid-argument",e.message);}
+  const ref=db.doc("tenants/"+tenantId),stateRef=ref.collection("cashRegister").doc("state");
+  const shiftRef=ref.collection("cashShifts").doc(input.shiftId);
+  let result;
+  await db.runTransaction(async tx=>{
+    const role=await assertCashTenant(tx,ref,tenantId,auth);
+    const [state,shift]=await Promise.all([tx.get(stateRef),tx.get(shiftRef)]);
+    if(!shift.exists)fail("not-found","Turno de caixa não encontrado.");
+    if(shift.data().status==="closed")
+      fail("failed-precondition","Turno de caixa já fechado.");
+    if(!state.exists||state.data().activeShiftId!==input.shiftId
+      ||shift.data().status!=="open")
+      fail("failed-precondition","Turno de caixa incorreto ou inativo.");
+    const expectedCents=shift.data().expectedCents;
+    const differenceCents=input.countedCents-expectedCents;
+    const at=FieldValue.serverTimestamp();
+    tx.update(shiftRef,{status:"closed",closedAt:at,closedBy:auth.uid,
+      countedCents:input.countedCents,differenceCents,updatedAt:at});
+    tx.set(stateRef,{activeShiftId:null,updatedAt:at});
+    tx.create(ref.collection("auditLogs").doc(),auditRecord({
+      tenantId,actorId:auth.uid,actorRole:role,action:"cash_shift.closed",
+      entityType:"cash_shift",entityId:input.shiftId,
+      metadata:{expectedCents,countedCents:input.countedCents,differenceCents},
+    }));
+    result={shiftId:input.shiftId,expectedCents,
+      countedCents:input.countedCents,differenceCents};
+  });
+  return result;
+});
+/** Bounded manager/cashier read. All numbers are manual cash records, not sales/payment reconciliation. */
+exports.getTenantCashRegister=onCall({region:REGION,maxInstances:20},async(request)=>{
+  const auth=requireAuth(request),tenantId=cashTenantId(request);
+  const ref=db.doc("tenants/"+tenantId),stateRef=ref.collection("cashRegister").doc("state");
+  const [tenant,member,state]=await Promise.all([
+    ref.get(),auth.token.platform_owner===true?Promise.resolve(null):
+      db.doc("memberships/"+tenantId+"_"+auth.uid).get(),stateRef.get(),
+  ]);
+  if(!tenant.exists)fail("not-found","Sorveteria inexistente.");
+  if(auth.token.platform_owner!==true){
+    const m=member?.exists?member.data():null;
+    if(!isActiveTenantMembership(m,tenantId,auth.uid)
+      ||!["tenant_owner","tenant_admin","cashier"].includes(m.role))
+      fail("permission-denied","Perfil sem acesso ao caixa.");
+  }
+  requireCommercialFeature(tenant.data(),"cash_register");
+  const activeShiftId=state.exists?state.data().activeShiftId:null;
+  const shiftRef=typeof activeShiftId==="string"
+    &&/^sh_[0-9a-f-]{36}$/.test(activeShiftId)
+    ?ref.collection("cashShifts").doc(activeShiftId):null;
+  const [activeSnapshot,history]=await Promise.all([
+    shiftRef?shiftRef.get():Promise.resolve(null),
+    ref.collection("cashShifts").orderBy("openedAt","desc").limit(10).get(),
+  ]);
+  const [movements]=await Promise.all([
+    activeSnapshot?.exists?shiftRef.collection("movements")
+      .orderBy("createdAt","desc").limit(30).get():Promise.resolve(null),
+  ]);
+  return {activeShift:activeSnapshot?.exists
+      ?projectCashShift(activeSnapshot.id,activeSnapshot.data()):null,
+    movements:movements?.docs.map(d=>projectCashMovement(d.id,d.data())).filter(Boolean)??[],
+    recentShifts:history.docs.map(d=>projectCashShift(d.id,d.data())).filter(Boolean),
+    refreshedAt:new Date().toISOString()};
 });
 
 /** Kitchen board for Pro/Premium: bounded, private and fetched over HTTPS. */
