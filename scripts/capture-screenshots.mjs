@@ -308,6 +308,11 @@ try {
   await setOrderSelect(publicCode, "select[aria-label=Entregador]", "driver-alpha");
   await clickOrderButton(publicCode, "Atribuir entrega");
   await waitText("Aguardando entregador", 20000);
+  // Essential-tier sales summary must be readable without exposing order/customer PII.
+  // This is a browser assertion, not a screenshot: retain the established 22 images/round.
+  await clickButton("Resumo de vendas", "[role=tab]");
+  await waitText("Resumo de pedidos");
+  await waitUntil(async () => await evaluate("Boolean(document.querySelector('.sales-summary-grid') && document.body.innerText.includes('Pedidos recebidos'))"), "Resumo de vendas", 30000);
   await clickButton("Catálogo", "[role=tab]");
   await waitText("Catálogo da loja");
   await capture("tenant-owner-catalogo.png");
