@@ -46,7 +46,7 @@ describe("PII-free operational reporting aggregation",()=>{
   });
   it("rejects invalid scope and missing timestamps",()=>{
     expect(()=>buildIntermediateReport({orders:[],days:365,startMs:start,endMs:end,truncated:false})).toThrow();
-    expect(()=>report(null as unknown[])).toThrow();
+    expect(()=>report(null as unknown as unknown[])).toThrow();
     expect(report([doc(-2,"delivered"),doc(9,"delivered"),{status:"delivered"}]).completedOrders).toBe(0);
   });
   it("obeys Pro/Premium entitlements and explicit overrides",()=>{
