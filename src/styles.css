@@ -236,3 +236,14 @@ label { display: grid; gap: 8px; color: #51475d; font-size: .9rem; font-weight: 
   .team-row > span:not(.status-pill) { grid-column: 1; }
   .team-form { grid-template-columns: 1fr; }
 }
+
+
+/* White-label colors extend to all tenant routes; platform marketing stays unchanged. */
+.tenant-scope { min-height: 100vh; background: var(--tenant-bg, #fffaf3); color: var(--tenant-text, #201a2a); }
+.tenant-scope .button { border-radius: var(--tenant-radius, 20px); }
+.tenant-scope .primary { background: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope .secondary { background: var(--tenant-secondary, #f1e9ff); }
+.tenant-scope .eyebrow, .tenant-scope .text-button { color: var(--tenant-primary, #6d28d9); }
+.tenant-scope .category-chips button.selected { background: var(--tenant-primary, #6d28d9); border-color: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope .cart-button span { background: var(--tenant-primary, #6d28d9); color: var(--tenant-on-primary, white); }
+.tenant-scope button:focus-visible, .tenant-scope a:focus-visible, .tenant-scope input:focus-visible { outline-color: var(--tenant-primary, #6d28d9); }
