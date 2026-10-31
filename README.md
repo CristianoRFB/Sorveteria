@@ -45,6 +45,7 @@ npm run dev:emulator
 - Tracking tem prazo máximo para leitura e refresh com pausa em abas ocultas, finalização em estados terminais e backoff de falhas. **A jornada E2E local foi aprovada três vezes consecutivas no Emulator Suite; staging hospedado ainda não foi validado.**
 - Planos, períodos de avaliação, limites, overrides e atribuição manual estão implementados. Billing automático **não** está aprovado nem implementado.
 - O painel inclui **resumo básico de pedidos** (7/30 dias) com contagens e valores dos pedidos concluídos, calculados por agregação indexada no backend. Os valores não são pagamentos conciliados.
+- O **KDS de cozinha para Pro/Premium** está implementado em `/:tenantSlug/painel/cozinha`. A fila de preparo usa HTTPS com projeção sem dados pessoais, exibe etapas de confirmação/preparo/pronto e reutiliza transições auditadas no backend. Acesso bloqueado para Essencial por padrão.
 - Fotos de produtos podem ser cadastradas, editadas ou removidas pelo administrador usando URLs HTTPS; o cardápio usa carregamento otimizado e fallback visual.
 - `.env.example` é apenas um modelo de campos públicos; arquivos `.env.*` reais, service accounts e certificados privados jamais devem ser versionados.
 - Builds hospedados com projeto `demo-*`, placeholders Firebase ou `VITE_USE_EMULATORS=true` são rejeitados no startup.
