@@ -12,8 +12,10 @@ import { addTenantMember, setTenantMemberStatus, watchTenantOperations, watchTen
 import type { Membership } from "@/domain/membership";
 import { loadTenantSettings, saveTenantSettings, type TenantSettings } from "@/services/tenantSettings";
 import { LoadingState } from "@/components/LoadingState";
+import { SalesSummaryPanel } from "@/components/SalesSummaryPanel";
+import { canUseTenantFeature } from "@/domain/entitlements";
 
-type Tab = "orders" | "catalog" | "settings";
+type Tab = "orders" | "catalog" | "settings" | "sales";
 type OptionDraft = { id: string; name: string; priceDeltaCents: number; available: boolean };
 type GroupDraft = { id: string; name: string; required: boolean; minSelections: number; maxSelections: number; options: OptionDraft[] };
 type ProductDraft = { name: string; description: string; categoryId: string; kind: CatalogProduct["kind"]; price: string; available: boolean; optionGroups: GroupDraft[] };
@@ -65,6 +67,7 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
   // A membership returned by a hook must always belong to the active tenant.
   const scopedRole = membership?.tenantId === tenant.id ? membership.role : null;
   const canManage = isPlatformOwner || scopedRole === "tenant_owner" || scopedRole === "tenant_admin";
+  const canReadSales = canUseTenantFeature(tenant,"basic_sales_summary");
   const [tab, setTab] = useState<Tab>("orders");
 
   return (
@@ -75,12 +78,14 @@ function TenantAdminView({ tenant }: { tenant: Tenant }) {
       <p className="muted">Pedidos, catálogo e configurações da sua sorveteria.</p>
       <div className="admin-nav" role="tablist" aria-label="Seções do painel">
         <button role="tab" aria-selected={tab === "orders"} className={tab === "orders" ? "active" : ""} onClick={() => setTab("orders")}>Pedidos</button>
+        {canReadSales && <button role="tab" aria-selected={tab === "sales"} className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Resumo de vendas</button>}
         {canManage && <button role="tab" aria-selected={tab === "catalog"} className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>Catálogo</button>}
         {canManage && <button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>Checkout e equipe</button>}
         <Link to={`/${tenant.slug}/painel/qr-codes`}>QR do cardápio</Link>
         <Link to={`/${tenant.slug}/cardapio`} target="_blank">Ver loja</Link>
       </div>
       {(!canManage || tab === "orders") && <OrderManager tenantId={tenant.id} canResetDeliveryCode={isPlatformOwner || scopedRole === "tenant_owner"} />}
+      {canReadSales && tab === "sales" && <SalesSummaryPanel tenantId={tenant.id} />}
       {canManage && tab === "catalog" && <CatalogManager tenantId={tenant.id} />}
       {tab === "settings" && canManage && <><SettingsEditor tenantId={tenant.id} /><TeamManager tenantId={tenant.id} /></>}
     </main>
