@@ -115,7 +115,7 @@ describe("Owner HTTPS operations snapshot RBAC and Alpha/Beta isolation",()=>{
 });
 
 describe("product images can be created, edited and removed by a scoped manager",()=>{
-  const createdId="image-test-product-"+Date.now().toString(36);
+  let createdId:string;
   const newProduct={name:"Gelato imagem teste",description:"",categoryId:"gelatos",kind:"pot",
     priceCents:1200,available:true,optionGroups:[]};
   const edit=(tenantId:string, imageUrl:string)=>{
@@ -125,7 +125,8 @@ describe("product images can be created, edited and removed by a scoped manager"
   it("allows an Alpha manager to add an HTTPS image and safely clear it",async()=>{
     await login("owner.alpha@demo.sorveteria.test");
     const create=httpsCallable(functions,"saveCatalogProduct");
-    await create({tenantId:"tenant-alpha",productId:createdId,product:{...newProduct,imageUrl:"https://static.example.org/gelato.webp"}});
+    const created=await create({tenantId:"tenant-alpha",product:{...newProduct,imageUrl:"https://static.example.org/gelato.webp"}});
+    createdId=(created.data as {id:string}).id;
     const withPhoto=(await publicCatalog("tenant-alpha")).data.products.find(p=>p.id===createdId);
     expect(withPhoto).toMatchObject({id:createdId});
     expect((withPhoto as typeof withPhoto & {imageUrl?:string})?.imageUrl).toBe("https://static.example.org/gelato.webp");
